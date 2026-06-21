@@ -139,4 +139,10 @@ program
   .description("Meet Shepherd 🐑")
   .action(() => printBanner(true));
 
-program.parseAsync();
+program.parseAsync().catch((err: unknown) => {
+  // never dump a raw stack at the user — a clean message + non-zero exit.
+  const msg = err instanceof Error ? err.message : String(err);
+  console.error(`\nshepherd: ${msg}`);
+  console.error("If this looks like a bug, please open an issue at https://github.com/Arkit-k/shepherd/issues\n");
+  process.exit(1);
+});

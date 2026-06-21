@@ -12,6 +12,20 @@ export interface Finding {
   message: string;
 }
 
+// Collapse exact-duplicate findings (same check, same place, same message) —
+// the full run layers a deterministic scan + per-module passes that can overlap.
+export function dedupeFindings(findings: Finding[]): Finding[] {
+  const seen = new Set<string>();
+  const out: Finding[] = [];
+  for (const f of findings) {
+    const key = `${f.id}|${f.file}|${f.line ?? ""}|${f.message}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(f);
+  }
+  return out;
+}
+
 const icon: Record<Severity, (s: string) => string> = {
   critical: (s) => pc.red("🔴 " + s),
   warn: (s) => pc.yellow("🟡 " + s),

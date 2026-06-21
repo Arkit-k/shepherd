@@ -13,7 +13,6 @@ import type { Finding } from "./report.js";
 // deterministic presence checks — the moat.
 
 interface OpsOptions {
-  microservices?: boolean; // health endpoint becomes a gate for microservices
   audit?: boolean; // run `npm audit` (network + lockfile; best-effort)
 }
 
@@ -97,9 +96,13 @@ export function operationsChecks(repo: Repo, opts: OpsOptions = {}): Finding[] {
     (f) => /\/(health|healthz|readyz|ready|ping|livez)\b/.test(f.path) || /['"`]\/(health|healthz|readyz|livez|ping)['"`]/.test(f.content),
   );
   if (hasServer && !hasHealth) {
-    const msg =
-      "No health/readiness endpoint (/healthz, /readyz) — a load balancer or orchestrator can't tell if the instance is alive or draining, so zero-downtime deploys and autoscaling don't work.";
-    out.push(opts.microservices ? gate("no-health-endpoint", "(operations)", msg) : advise("no-health-endpoint", "(operations)", msg));
+    out.push(
+      advise(
+        "no-health-endpoint",
+        "(operations)",
+        "No health/readiness endpoint (/healthz, /readyz) — a load balancer or orchestrator can't tell if the instance is alive or draining, so zero-downtime deploys and autoscaling don't work.",
+      ),
+    );
   }
 
   // graceful shutdown

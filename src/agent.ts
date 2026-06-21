@@ -11,7 +11,7 @@ import { operationsChecks } from "./engine/operations.js";
 import { scan } from "./engine/run.js";
 import { claudeAvailable } from "./engine/fixers/claude.js";
 import { buildFixOrder, writeFixOrder, claudeSessionRunning } from "./engine/handoff.js";
-import { printReport, type Finding } from "./engine/report.js";
+import { printReport, dedupeFindings, type Finding } from "./engine/report.js";
 import { recordScan } from "./engine/ledger.js";
 import { analyzeArchitecture } from "./engine/backend/architecture.js";
 import { analyzeProduction } from "./engine/backend/production.js";
@@ -131,10 +131,7 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
   // operations & observability — is it OPERABLE? (error tracking, logging,
   // health, graceful shutdown, .env hygiene, CI, Dockerfile, npm audit CVEs).
   console.log(pc.dim("  Operations & observability checks (incl. npm audit) …"));
-  const opsFindings = operationsChecks(repo, {
-    microservices: architecture.shape === "microservices",
-    audit: true,
-  });
+  const opsFindings = operationsChecks(repo, { audit: true });
 
   const scaleFindings = scaleAndResilience(repo, { deep: hasClaude });
   const feFindings = frontendScale(repo, { deep: hasClaude });
@@ -154,10 +151,14 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
   console.log(pc.dim("\n  Load test (Docker + bounded ramp) …"));
   const { findings: loadFindings, metrics: loadMetrics } = await loadTest(repo, missingInfra);
 
-  const findings: Finding[] = [
+  // `audit.findings` already carries the full deterministic sweep (scan() runs
+  // operations/structure/idioms/design/scale-T1/fe-T1), so the per-module calls
+  // below overlap on their Tier-1 rows — dedupe collapses those, keeping the
+  // Claude/empirical/network findings unique.
+  const findings: Finding[] = dedupeFindings([
+    ...audit.findings,
     ...modernity,
     ...structureFindings,
-    ...audit.findings,
     ...architecture.findings,
     ...production.findings,
     ...researchFindings,
@@ -167,7 +168,7 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
     ...feFindings,
     ...live,
     ...loadFindings,
-  ];
+  ]);
   printReport(findings);
   try {
     if (!process.env.SHEPHERD_NO_LEDGER) recordScan(repo, findings);
