@@ -4,6 +4,8 @@ import { buildModel } from "./engine/ast.js";
 import { detectStack, printStack } from "./engine/tech-stack.js";
 import { understandArchitecture } from "./engine/understand.js";
 import { outdatedDependencies, reviewModernity } from "./engine/modernity.js";
+import { betterPatterns } from "./engine/idioms.js";
+import { analyzeStructure, reviewStructure } from "./engine/structure.js";
 import { scan } from "./engine/run.js";
 import { claudeAvailable } from "./engine/fixers/claude.js";
 import { buildFixOrder, writeFixOrder, claudeSessionRunning } from "./engine/handoff.js";
@@ -57,19 +59,25 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
   // first run installs .shepherd/ and tracks the project from here on.
   loadProject(root);
 
-  // ① Surveyor — what is this app, and what is it built with?
+  // ① Surveyor — what is this app, how is it built, and how is it organized?
   phase(1, "Survey", "Surveyor");
   const tech = detectStack(repo);
   printStack(tech);
+  const structure = analyzeStructure(repo);
+  console.log(pc.dim(`\n  Structure: ${structure.style}-based organization` + (structure.style === "feature" ? " ✓" : "")));
+  const structureFindings: Finding[] = [...structure.findings];
   if (hasClaude) {
-    console.log(pc.dim("\n  Reading the architecture …"));
+    console.log(pc.dim("  Reading the architecture …"));
     const summary = understandArchitecture(repo, model);
     if (summary) console.log("\n" + summary.trim() + "\n");
+    structureFindings.push(...reviewStructure(repo));
   }
 
-  // ② Modernizer — outdated deps + deprecated patterns AI tools still emit.
+  // ② Modernizer — outdated deps + deprecated patterns + old-but-works idioms
+  //    where a newer, safer framework primitive exists (e.g. Server Actions).
   phase(2, "Modernity", "Modernizer");
   const modernity: Finding[] = await outdatedDependencies(repo);
+  modernity.push(...betterPatterns(repo, { deep: hasClaude }));
   if (hasClaude) modernity.push(...reviewModernity(repo));
   printReport(modernity);
 
@@ -127,6 +135,8 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
   const { findings: loadFindings, metrics: loadMetrics } = await loadTest(repo, missingInfra);
 
   const findings: Finding[] = [
+    ...modernity,
+    ...structureFindings,
     ...audit.findings,
     ...architecture.findings,
     ...production.findings,

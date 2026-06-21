@@ -31,7 +31,7 @@ That's the whole interface. No flags, no subcommands to learn. Shepherd surveys 
 One run dispatches a sequence of agents — the way a senior engineer reviews a handoff:
 
 1. **Surveyor** — walks the codebase and states what it is and what it's built with.
-2. **Modernizer** — flags outdated dependencies and deprecated patterns AI tools still emit.
+2. **Modernizer** — outdated dependencies, deprecated patterns, **and old-but-works idioms where a newer/safer primitive exists** (e.g. a form posting via client `fetch` → Next.js **Server Actions**; class components → hooks; `getServerSideProps` → App Router server components; `moment` → date-fns). Also reads how the repo is **organized** and recommends feature-folders (vertical slices) over layer-folders, the way top teams build.
 3. **Auditor** — security, performance, architecture, and logic findings, split into **gates** (block the merge) and **advice**.
 4. **Backend & Production-Readiness** — the part that earns the "production" promise:
    - **Pattern** — detects the *actual* architecture: event-driven, task-queue/async-jobs, CQRS, event-sourcing, hexagonal/clean, spec-driven, layered/MVC.
