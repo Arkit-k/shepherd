@@ -6,6 +6,7 @@ import { claudeAvailable, ClaudeFixer } from "./engine/fixers/claude.js";
 import { PlaceholderFixer } from "./engine/fixers/placeholder.js";
 import { registerMcp } from "./init.js";
 import { printBanner } from "./banner.js";
+import { runAgent } from "./agent.js";
 import type { Finding } from "./engine/report.js";
 
 const program = new Command();
@@ -14,9 +15,20 @@ program
   .description("Production-readiness gate for AI-written code")
   .version("0.0.1");
 
-// shepherd scan [path]   (default)
+// shepherd [path]   (default) — the autonomous agent. No flags to learn:
+// survey → modernity → audit → fix, end-to-end on the user's own Claude.
 program
-  .command("scan [path]", { isDefault: true })
+  .command("run [path]", { isDefault: true })
+  .description("Autonomous run: survey, audit, and fix your repo on your Claude")
+  .option("--no-fix", "audit only — don't apply fixes")
+  .action(async (p = ".", opts: { fix?: boolean }) => {
+    await printBanner();
+    process.exitCode = await runAgent(p, { autoFix: opts.fix !== false });
+  });
+
+// shepherd scan [path]   (power users — audit only, no fix loop)
+program
+  .command("scan [path]")
   .description("Scan a repo for production-readiness issues")
   .option("--deep", "add a Claude-powered aggressive review of security-sensitive files")
   .action(async (p = ".", opts: { deep?: boolean }) => {

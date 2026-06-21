@@ -14,10 +14,10 @@
 AI tools (Lovable, Bolt, v0, Cursor, Claude) ship working apps fast — and quietly leave behind cost-bombs, missing auth, client-only access control, outdated patterns, and architectural drift. Shepherd is the gate that catches what AI code specifically gets wrong, and fixes it. It runs continuously — on every push — not as a one-time audit.
 
 ```bash
-npx shepherd            # scan the current repo
-npx shepherd --deep     # + Claude-powered aggressive review
-npx shepherd fix        # detect → fix → re-verify, until shipshape
+npx shepherd
 ```
+
+That's the whole interface. No flags, no subcommands to learn. Shepherd surveys your codebase, audits it, and fixes what it can — end to end — on your own Claude session. You run it and walk away.
 
 ## Why Shepherd
 
@@ -28,22 +28,26 @@ npx shepherd fix        # detect → fix → re-verify, until shipshape
 
 ## The walk-through
 
-Shepherd works the way a senior engineer would review a handoff:
+One run dispatches four agents in sequence — the way a senior engineer reviews a handoff:
 
-1. **Understand** — walks the codebase, states the tech stack and architecture (`shepherd understand --deep`).
-2. **Modernity** — flags outdated dependencies and deprecated code patterns AI tools still emit (`shepherd modernity --deep`).
-3. **Audit** — security, performance, architecture, and logic findings, split into **gates** (block the merge) and **advice**.
-4. **Fix loop** — Claude fixes each gate, re-verifies, and repeats until clean or no further progress.
+1. **Surveyor** — walks the codebase and states what it is and what it's built with.
+2. **Modernizer** — flags outdated dependencies and deprecated patterns AI tools still emit.
+3. **Auditor** — security, performance, architecture, and logic findings, split into **gates** (block the merge) and **advice**.
+4. **Fixer** — hands each gate to your Claude, applies the fix, re-verifies, and repeats until clean or a human is needed.
 
-## Commands
+Files are edited in place; your repo is git-tracked, so every change is reviewable and reversible.
+
+## Advanced: run a single phase
+
+Most people never need these — `shepherd` does it all. But each agent is also a subcommand:
 
 | Command | What it does |
 |---|---|
-| `shepherd scan [path]` | Scan for production-readiness issues (default command) |
-| `shepherd scan --deep` | Add a Claude review of security-sensitive files |
-| `shepherd fix [path]` | Run the agent loop: detect → fix → re-verify |
-| `shepherd understand [--deep]` | Tech stack (+ Claude architecture summary) |
-| `shepherd modernity [--deep]` | Outdated deps (+ deprecated code patterns) |
+| `shepherd` | **Autonomous run — survey, audit, and fix (this is all you need)** |
+| `shepherd scan [path]` | Audit only, no fix loop (`--deep` for the Claude review) |
+| `shepherd fix [path]` | Just the fix loop: detect → fix → re-verify |
+| `shepherd understand [--deep]` | Tech stack + Claude architecture summary |
+| `shepherd modernity [--deep]` | Outdated deps + deprecated code patterns |
 | `shepherd stats` | What Shepherd has learned across all scans |
 | `shepherd init` | Register Shepherd's MCP server with Claude Code |
 
