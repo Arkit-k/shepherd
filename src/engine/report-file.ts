@@ -6,6 +6,7 @@ import type { TechStack } from "./tech-stack.js";
 import type { ArchitectureResult } from "./backend/architecture.js";
 import type { PatternResult } from "./backend/production.js";
 import type { LoadMetrics } from "./backend/loadtest.js";
+import { verdictMarkdown, type GoLiveVerdict } from "./gate.js";
 import {
   loadProject,
   recordRun,
@@ -24,6 +25,7 @@ export interface ReportSections {
   production: PatternResult;
   liveProbeRan: boolean;
   loadMetrics?: LoadMetrics;
+  verdict?: GoLiveVerdict;
   findings: Finding[];
 }
 
@@ -113,7 +115,8 @@ function buildMarkdown(repo: Repo, s: ReportSections): string {
     ``,
     `_Generated ${s.ts}_`,
     ``,
-    `**Verdict:** ${gates.length === 0 ? "✅ shipshape" : `🔴 ${gates.length} blocking issue(s)`} · ${advise.length} advisory.`,
+    `## Go-Live Verdict`,
+    s.verdict ? verdictMarkdown(s.verdict) : `${gates.length === 0 ? "✅ shipshape" : `🔴 ${gates.length} blocking`} · ${advise.length} advisory.`,
     ``,
     `## Tech stack`,
     `- **Language:** ${s.tech.language}`,

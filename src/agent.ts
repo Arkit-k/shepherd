@@ -17,6 +17,7 @@ import { frontendScale } from "./engine/frontend/scale.js";
 import { liveProbe } from "./engine/backend/probe.js";
 import { loadTest } from "./engine/backend/loadtest.js";
 import { writeReport } from "./engine/report-file.js";
+import { goLiveVerdict, printVerdict } from "./engine/gate.js";
 import { loadProject } from "./engine/project.js";
 
 interface AgentOptions {
@@ -142,25 +143,26 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
     /* ledger is best-effort */
   }
 
+  // ⑤ Go-Live Gate — the principal-engineer call: ship or not, and the path.
+  const verdict = goLiveVerdict(findings);
+
   // record the keep-able artifact + project tracking, no matter the verdict.
   let reportPath = "";
   try {
-    reportPath = writeReport(repo, { ts, tech, architecture, production, liveProbeRan, loadMetrics, findings });
+    reportPath = writeReport(repo, { ts, tech, architecture, production, liveProbeRan, loadMetrics, verdict, findings });
   } catch {
     /* report is best-effort */
   }
   if (reportPath) console.log(pc.dim(`\n  📄 Detailed report: ${reportPath.replace(/\\/g, "/")}`));
 
-  const gates = findings.filter((f) => f.disposition === "gate");
+  printVerdict(verdict);
 
-  // ⑤ Hand-off — Shepherd is the maintainer, not the editor. It writes a precise
+  // ⑥ Hand-off — Shepherd is the maintainer, not the editor. It writes a precise
   //    fix work-order and hands it to the user's OWN Claude Code session.
-  if (gates.length === 0) {
-    console.log(pc.green("\n  ✅ No blocking issues. Shepherd says: shipshape.\n"));
-    return 0;
-  }
+  if (verdict.ready) return 0;
 
-  phase(5, "Hand-off", "Maintainer");
+  const gates = findings.filter((f) => f.disposition === "gate");
+  phase(6, "Hand-off", "Maintainer");
   let orderPath = ".shepherd/fix-order.md";
   try {
     orderPath = writeFixOrder(root, buildFixOrder(gates, ts));

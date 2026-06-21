@@ -41,7 +41,21 @@ One run dispatches a sequence of agents — the way a senior engineer reviews a 
    - **Frontend at 1M DAU** — raw `<img>`, heavy client bundles, fetch waterfalls, unvirtualized lists.
    - **Live attack** — boots your app and runs a bounded, localhost-only probe that *proves* the cost-bomb (no `429` under a burst), auth bypass, missing headers, stack-trace leakage.
    - **Load test** — if Docker is present, stands up the real dependencies, runs a bounded ramp, finds the single-box ceiling, and **projects honestly** toward the target with the bottleneck named. (We measure and project — we don't pretend a laptop proves 1M req/s.)
-5. **Hand-off** — Shepherd writes the blocking issues into a precise fix work-order (`.shepherd/fix-order.md`) and hands it to **your own Claude Code session** to apply. It never edits your code itself.
+5. **Go-Live Gate** — the principal-engineer call. Shepherd collapses every finding into distinct **blockers** (no duplicate noise), orders them into a **critical path**, and gives one verdict: **Ship / Not-ready-yet**, with a rough effort-to-green.
+6. **Hand-off** — Shepherd writes the blockers into a precise fix work-order (`.shepherd/fix-order.md`) and hands it to **your own Claude Code session** to apply. It never edits your code itself.
+
+```
+  ════════════════════════════════════════
+   GO-LIVE VERDICT:  🔴 NOT READY
+  ════════════════════════════════════════
+   Blocked on 9 must-fix (in order):
+     1. Unprotected expensive/AI endpoint (needs auth + rate limit)
+     2. Error/stack-trace leakage to clients
+     3. Request input not validated
+     ...
+   + 1 advisory. Estimated about a week to green.
+  ════════════════════════════════════════
+```
 
 ## How the hand-off works
 
