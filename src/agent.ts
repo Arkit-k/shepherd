@@ -6,6 +6,7 @@ import { understandArchitecture } from "./engine/understand.js";
 import { outdatedDependencies, reviewModernity } from "./engine/modernity.js";
 import { betterPatterns } from "./engine/idioms.js";
 import { analyzeStructure, reviewStructure } from "./engine/structure.js";
+import { designPatterns } from "./engine/design-patterns.js";
 import { scan } from "./engine/run.js";
 import { claudeAvailable } from "./engine/fixers/claude.js";
 import { buildFixOrder, writeFixOrder, claudeSessionRunning } from "./engine/handoff.js";
@@ -116,6 +117,16 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
     });
   }
 
+  // design patterns + trade-offs, judged AS PER THIS PROJECT (stack/pattern/scale).
+  const designFindings = designPatterns(repo, {
+    deep: hasClaude,
+    context: {
+      stack: `${tech.language}, ${tech.frameworks.join(", ") || "—"}`,
+      patterns: production.patterns.join(", "),
+      scale: "~1,000,000 users",
+    },
+  });
+
   const scaleFindings = scaleAndResilience(repo, { deep: hasClaude });
   const feFindings = frontendScale(repo, { deep: hasClaude });
   const live = await liveProbe(repo);
@@ -141,6 +152,7 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
     ...architecture.findings,
     ...production.findings,
     ...researchFindings,
+    ...designFindings,
     ...scaleFindings,
     ...feFindings,
     ...live,
