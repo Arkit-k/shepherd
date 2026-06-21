@@ -33,7 +33,13 @@ One run dispatches a sequence of agents — the way a senior engineer reviews a 
 1. **Surveyor** — walks the codebase and states what it is and what it's built with.
 2. **Modernizer** — flags outdated dependencies and deprecated patterns AI tools still emit.
 3. **Auditor** — security, performance, architecture, and logic findings, split into **gates** (block the merge) and **advice**.
-4. **Backend & Production-Readiness** — classifies the backend (monolith / microservices / serverless), checks the comms style (tRPC / gRPC / GraphQL / queues) is done correctly, runs scale-to-1M and error-tolerance checks, then **boots your app and attacks it** — a bounded, localhost-only probe that *proves* the cost-bomb (no `429` under a burst), auth bypass, missing security headers, and stack-trace leakage.
+4. **Backend & Production-Readiness** — the part that earns the "production" promise:
+   - **Pattern** — detects the *actual* architecture: event-driven, task-queue/async-jobs, CQRS, event-sourcing, hexagonal/clean, spec-driven, layered/MVC.
+   - **Production engineer** — takes inventory of what infra is *present* (broker / queue / cache / pool / Docker) and reasons like a principal engineer: *given this pattern at 1M, what's required and missing?* Event-driven on an in-process `EventEmitter` with no Kafka/RabbitMQ → gate. Background work in the request path with no BullMQ/Celery worker → gate. No cache, no connection pool → gate.
+   - **Scale & resilience** — scales-to-1M and error-tolerance checks (N+1, unbounded queries, no timeouts/retries/validation, in-memory state).
+   - **Frontend at 1M DAU** — raw `<img>`, heavy client bundles, fetch waterfalls, unvirtualized lists.
+   - **Live attack** — boots your app and runs a bounded, localhost-only probe that *proves* the cost-bomb (no `429` under a burst), auth bypass, missing headers, stack-trace leakage.
+   - **Load test** — if Docker is present, stands up the real dependencies, runs a bounded ramp, finds the single-box ceiling, and **projects honestly** toward the target with the bottleneck named. (We measure and project — we don't pretend a laptop proves 1M req/s.)
 5. **Fixer** — hands each gate to your Claude, applies the fix, re-verifies, and repeats until clean or a human is needed.
 
 Files are edited in place; your repo is git-tracked, so every change is reviewable and reversible.

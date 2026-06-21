@@ -30,6 +30,9 @@ Stack: **TypeScript + Node**, distributed via `npm`. Targets JS/TS apps (Next.js
   - **`.shepherd/` project tracking** (`project.ts`): installs per-project like `.claude/` — learned `config.json` (start cmd/port), `SHEPHERD.md` profile, `history.jsonl` trend, `reports/`, `baseline.json`
   - **Detailed report** (`report-file.ts`): writes `.shepherd/reports/<ts>.md` (+ `latest.md`) with verdict, tech, architecture, rate-limit map, live results, full findings table
   - All backend findings feed the existing **Fixer** so the autonomous run still closes the gates
+- **Architecture-pattern + production-engineer reasoning** (`backend/production.ts`) — **done & verified**: detects the real pattern (event-driven, task-queue, CQRS, event-sourcing, hexagonal, spec-driven, layered) and reasons like a principal prod engineer about required-but-missing infra. On a fixture it correctly flagged in-process EventEmitter → needs a real broker (gate), inline email work → needs a queue/worker (gate), no idempotency/retry/DLQ, no cache, no health/readiness + graceful shutdown, no containerization
+- **Frontend scale to 1M DAU** (`frontend/scale.ts`) — **done**: raw `<img>`, heavy client components, useEffect fetch waterfalls, unvirtualized lists + Claude pass
+- **Docker load test** (`backend/loadtest.ts`) — **done & verified**: auto-runs when Docker present; stands up compose deps, bounded concurrency ramp (10→100), measures req/s + p50/p95/p99 + error rate, finds the single-box ceiling, **projects honestly** to 1M/day + names the bottleneck (measured 3,573 req/s on the fixture; "1M req/s is a fleet concern, not single-box"). Always tears down. Load-tests a SAFE endpoint (root/health), never the AI/payment routes
 - **Next:** the **GitHub App** (monetization + lock-in surface #4 — same engine, server-side, your API, fix PRs on push)
 
 ### Two integration paths (both built)

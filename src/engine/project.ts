@@ -17,6 +17,7 @@ export interface ProjectConfig {
   // What Shepherd learned about how to boot this app for the live probe.
   // Detected once, reused after — and the user can hand-edit it.
   startCommand?: string; // e.g. "npm run dev"
+  cwd?: string; // absolute dir to run it in (the app, not the monorepo root)
   port?: number; // e.g. 3000
   readyMarker?: string; // a string in stdout that means "the server is up"
   framework?: string; // e.g. "Next.js"

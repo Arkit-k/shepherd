@@ -104,19 +104,21 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 export async function startServer(repo: Repo): Promise<RunningServer | null> {
   const project: Project = loadProject(repo.root);
 
-  // 1. learned config wins; else auto-detect.
-  let dir = repo.root;
+  // 1. learned config wins; else auto-detect. We need BOTH the command and the
+  //    working dir (the app folder, not the monorepo root) — re-detect if either
+  //    is missing so an old config without cwd still boots the right app.
+  let dir = project.config.cwd;
   let port = project.config.port ?? DEFAULT_PORT;
   let command = project.config.startCommand;
 
-  if (!command) {
+  if (!command || !dir) {
     const cand = findCandidate(repo);
     if (!cand) return null;
     const pm = detectPackageManager(repo.root);
-    dir = cand.dir;
+    dir = cand.dir; // absolute (fast-glob absolute) — safe as a spawn cwd
     port = cand.port;
     command = `${pm} run ${cand.scriptName}`;
-    saveConfig(project, { startCommand: command, port, framework: cand.framework });
+    saveConfig(project, { startCommand: command, cwd: dir, port, framework: cand.framework });
   }
 
   const baseUrl = `http://localhost:${port}`;

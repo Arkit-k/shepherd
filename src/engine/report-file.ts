@@ -4,6 +4,8 @@ import type { Finding } from "./report.js";
 import type { Repo } from "./ingest.js";
 import type { TechStack } from "./tech-stack.js";
 import type { ArchitectureResult } from "./backend/architecture.js";
+import type { PatternResult } from "./backend/production.js";
+import type { LoadMetrics } from "./backend/loadtest.js";
 import {
   loadProject,
   recordRun,
@@ -19,7 +21,9 @@ export interface ReportSections {
   ts: string; // ISO timestamp, injected by the caller (no Date.now in the engine)
   tech: TechStack;
   architecture: ArchitectureResult;
+  production: PatternResult;
   liveProbeRan: boolean;
+  loadMetrics?: LoadMetrics;
   findings: Finding[];
 }
 
@@ -67,6 +71,23 @@ function rateLimitMap(repo: Repo, findings: Finding[]): string {
   return ["| Route | Auth | Rate-limit | Live |", "|---|---|---|---|", ...rows].join("\n") + "\n";
 }
 
+function loadTestSection(m?: LoadMetrics): string {
+  if (!m || !m.ran) return `_Skipped — ${m?.note ?? "Docker not available / no server"}._\n`;
+  const rows = m.stages.map(
+    (st) =>
+      `| ${st.concurrency} | ${st.rps} | ${st.p50} | ${st.p95} | ${st.p99} | ${(st.errorRate * 100).toFixed(1)}% |`,
+  );
+  return [
+    `Real dependencies stood up via Docker; bounded ramp against \`${m.target}\`.`,
+    ``,
+    `| Concurrency | req/s | p50 (ms) | p95 (ms) | p99 (ms) | errors |`,
+    `|---|---|---|---|---|---|`,
+    ...rows,
+    ``,
+    `**Projection:** ${m.projection}`,
+  ].join("\n");
+}
+
 function buildMarkdown(repo: Repo, s: ReportSections): string {
   const gates = s.findings.filter((f) => f.disposition === "gate");
   const advise = s.findings.filter((f) => f.disposition === "advise");
@@ -86,7 +107,18 @@ function buildMarkdown(repo: Repo, s: ReportSections): string {
     ``,
     `## Architecture`,
     `- **Shape:** ${s.architecture.shape}`,
+    `- **Pattern:** ${s.production.patterns.join(", ")}`,
     `- **Communication:** ${s.architecture.comms.join(", ") || "REST / HTTP"}`,
+    ``,
+    `## Production tooling (does the pattern have what it needs at 1M?)`,
+    `| Component | Present |`,
+    `|---|---|`,
+    `| Message broker | ${s.production.infra.broker ?? "❌ none"} |`,
+    `| Task / job queue | ${s.production.infra.taskQueue ?? "❌ none"} |`,
+    `| Cache | ${s.production.infra.cache ?? "❌ none"} |`,
+    `| Database | ${s.production.infra.database ?? "—"} |`,
+    `| Connection pooling | ${s.production.infra.pooling ? "✅" : "❌ none"} |`,
+    `| Docker | ${s.production.infra.hasCompose ? "compose ✅" : s.production.infra.hasDockerfile ? "Dockerfile ✅" : "❌ none"} |`,
     ``,
     `## Rate-limit map`,
     rateLimitMap(repo, s.findings),
@@ -94,6 +126,9 @@ function buildMarkdown(repo: Repo, s: ReportSections): string {
     s.liveProbeRan
       ? `Bounded, localhost-only attacks were run against the auto-started server. Results are folded into the findings table (rows tagged \`live:…\`).`
       : `_Skipped — the dev server could not be started, or the live probe is disabled in \`.shepherd/config.json\`._`,
+    ``,
+    `## Load test (Docker + bounded ramp)`,
+    loadTestSection(s.loadMetrics),
     ``,
     `## Findings`,
     findingsTable(s.findings),
