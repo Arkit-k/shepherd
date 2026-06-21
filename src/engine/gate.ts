@@ -1,5 +1,6 @@
 import pc from "picocolors";
 import type { Finding } from "./report.js";
+import { isReCheckable } from "./verify.js";
 
 // The Go-Live Gate. A principal engineer doesn't hand you a pile of findings —
 // they make the call: ship or don't, and if not, the shortest path to green.
@@ -13,6 +14,7 @@ export interface Blocker {
   weight: number; // rough effort, summed into the estimate
   findings: Finding[]; // the raw findings collapsed into this blocker
   files: string[];
+  judgment: boolean; // true = no re-checkable anchor (model judgment only)
 }
 
 export interface GoLiveVerdict {
@@ -159,11 +161,13 @@ export function goLiveVerdict(findings: Finding[]): GoLiveVerdict {
   for (const f of gates) {
     const { title, priority, weight } = categorize(f);
     const cur =
-      byTitle.get(title) ?? { title, priority, weight, findings: [], files: [] as string[] };
+      byTitle.get(title) ?? { title, priority, weight, findings: [], files: [] as string[], judgment: false };
     cur.findings.push(f);
     if (f.file && !cur.files.includes(f.file)) cur.files.push(f.file);
     byTitle.set(title, cur);
   }
+  // a blocker is "judgment" only if NONE of its findings has a re-checkable anchor.
+  for (const b of byTitle.values()) b.judgment = !b.findings.some(isReCheckable);
   const blockers = [...byTitle.values()].sort((a, b) => a.priority - b.priority);
   const totalWeight = blockers.reduce((s, b) => s + b.weight, 0);
 
@@ -208,10 +212,13 @@ export function printVerdict(v: GoLiveVerdict): void {
     console.log("   " + pc.bold(`Blocked on ${v.blockers.length} must-fix (in order):`));
     v.blockers.forEach((b, i) => {
       const where = b.files.length ? pc.dim(`  (${b.files.slice(0, 3).join(", ")}${b.files.length > 3 ? ", …" : ""})`) : "";
-      console.log(`     ${pc.bold(String(i + 1) + ".")} ${b.title}${where}`);
+      const tag = b.judgment ? pc.yellow(" ⚠ judgment") : "";
+      console.log(`     ${pc.bold(String(i + 1) + ".")} ${b.title}${tag}${where}`);
     });
     const adv = `${v.advisoryCount} ${v.advisoryCount === 1 ? "advisory" : "advisories"}`;
     console.log("   " + pc.dim(`+ ${adv}. Estimated ${v.estimate} to green.`));
+    if (v.blockers.some((b) => b.judgment))
+      console.log("   " + pc.dim("⚠ = model judgment, no deterministic re-check — verify with a full `shepherd` re-run or a human."));
   } else {
     console.log("   " + pc.green(v.summary));
   }
@@ -224,9 +231,10 @@ export function verdictMarkdown(v: GoLiveVerdict): string {
     lines.push(`**Critical path to green:**`, ``);
     v.blockers.forEach((b, i) => {
       const where = b.files.length ? ` — \`${b.files.slice(0, 4).join("`, `")}\`` : "";
-      lines.push(`${i + 1}. ${b.title}${where}`);
+      const tag = b.judgment ? " ⚠️ _(judgment — verify with a full re-run / human)_" : "";
+      lines.push(`${i + 1}. ${b.title}${tag}${where}`);
     });
-    lines.push(``, `_${v.advisoryCount} advisory improvement(s) noted separately. Estimated ${v.estimate} to green._`);
+    lines.push(``, `_${v.advisoryCount} advisory improvement(s) noted separately. Estimated ${v.estimate} to green. ⚠️ = model judgment with no deterministic re-check._`);
   }
   return lines.join("\n") + "\n";
 }

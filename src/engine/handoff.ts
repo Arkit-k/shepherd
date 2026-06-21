@@ -2,6 +2,7 @@ import { writeFileSync, existsSync, readFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import path from "node:path";
 import { loadProject } from "./project.js";
+import { verifyMethod } from "./verify.js";
 import type { Finding } from "./report.js";
 
 // Shepherd is the maintainer, not the editor. It never spawns its own headless
@@ -21,15 +22,29 @@ export function buildFixOrder(gates: Finding[], ts: string): string {
     byFile.set(g.file, arr);
   }
 
+  let anyJudgment = false;
   const sections: string[] = [];
   let n = 0;
   for (const [file, findings] of byFile) {
     n++;
     const items = findings
-      .map((f) => `   - [${f.id}${f.line ? ` · line ${f.line}` : ""}] ${f.message}`)
+      .map((f) => {
+        const judgment = verifyMethod(f) === "claude";
+        if (judgment) anyJudgment = true;
+        const tag = judgment ? " ⚠️" : "";
+        return `   - [${f.id}${f.line ? ` · line ${f.line}` : ""}]${tag} ${f.message}`;
+      })
       .join("\n");
     sections.push(`${n}. **\`${file}\`**\n${items}`);
   }
+
+  const verifyNote = anyJudgment
+    ? [
+        `**Verifying your fixes:**`,
+        `- Most gates re-confirm with \`npx shepherd scan\` — the same deterministic check re-runs and must come back clean.`,
+        `- Items marked ⚠️ are model-judgment findings with **no deterministic re-check**. A passing plain \`scan\` does NOT prove these are fixed — re-verify them by re-running the full \`npx shepherd\` audit (a fresh model review) or a human read.`,
+      ]
+    : [`After editing, run \`npx shepherd scan\` — the same checks re-run and must come back clean.`];
 
   return [
     `# Shepherd — fix work-order`,
@@ -37,9 +52,9 @@ export function buildFixOrder(gates: Finding[], ts: string): string {
     `_Generated ${ts}. ${gates.length} blocking issue(s). Shepherd found these; you apply them._`,
     ``,
     `You are fixing production-readiness gates in this repo. Work through each file below.`,
-    `Apply the **minimal** change for each issue — do not refactor, reformat, or touch`,
-    `anything unrelated. After editing, run \`npx shepherd scan\` to confirm the gates are`,
-    `closed before moving on.`,
+    `Apply the **minimal** change for each issue — do not refactor, reformat, or touch anything unrelated.`,
+    ``,
+    ...verifyNote,
     ``,
     ...sections,
     ``,
