@@ -5,6 +5,7 @@ import { fixLoop } from "./engine/loop.js";
 import { claudeAvailable, ClaudeFixer } from "./engine/fixers/claude.js";
 import { PlaceholderFixer } from "./engine/fixers/placeholder.js";
 import { registerMcp } from "./init.js";
+import { printBanner } from "./banner.js";
 import type { Finding } from "./engine/report.js";
 
 const program = new Command();
@@ -19,6 +20,7 @@ program
   .description("Scan a repo for production-readiness issues")
   .option("--deep", "add a Claude-powered aggressive review of security-sensitive files")
   .action(async (p = ".", opts: { deep?: boolean }) => {
+    await printBanner();
     const findings = await run(p, { deep: Boolean(opts.deep) });
     process.exitCode = findings.some((f) => f.disposition === "gate") ? 1 : 0;
   });
@@ -31,6 +33,7 @@ program
   .option("--with-tests", "also run the project's test suite as a gate")
   .option("--deep", "add a Claude-powered aggressive review each iteration")
   .action(async (p = ".", opts: { maxIterations: string; withTests?: boolean; deep?: boolean }) => {
+    await printBanner();
     const fixer = claudeAvailable() ? new ClaudeFixer() : new PlaceholderFixer();
     if (fixer.name === "placeholder") {
       console.log("⚠️  Claude Code not found on PATH — running the loop in dry mode (no fixes applied).");
@@ -49,6 +52,7 @@ program
   .description("Walk the codebase: tech stack (+ --deep for a Claude architecture summary)")
   .option("--deep", "add a Claude-written architecture summary + soft spots")
   .action(async (p = ".", opts: { deep?: boolean }) => {
+    await printBanner();
     const { ingest } = await import("./engine/ingest.js");
     const { detectStack, printStack } = await import("./engine/tech-stack.js");
     const repo = await ingest(p);
@@ -104,5 +108,10 @@ program
   .command("init")
   .description("Register Shepherd's MCP server with Claude Code")
   .action(() => registerMcp());
+
+program
+  .command("hello")
+  .description("Meet Shepherd 🐑")
+  .action(() => printBanner(true));
 
 program.parseAsync();
