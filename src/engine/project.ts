@@ -24,6 +24,7 @@ export interface ProjectConfig {
   // Toggles + safety caps.
   liveProbe?: boolean; // run the localhost attack probe (default true)
   attackBurst?: number; // requests in the rate-limit burst (default 40)
+  web?: boolean; // let the research step query the live internet (default true)
 }
 
 const DEFAULT_CONFIG: ProjectConfig = {

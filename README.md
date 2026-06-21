@@ -36,6 +36,7 @@ One run dispatches a sequence of agents — the way a senior engineer reviews a 
 4. **Backend & Production-Readiness** — the part that earns the "production" promise:
    - **Pattern** — detects the *actual* architecture: event-driven, task-queue/async-jobs, CQRS, event-sourcing, hexagonal/clean, spec-driven, layered/MVC.
    - **Production engineer** — takes inventory of what infra is *present* (broker / queue / cache / pool / Docker) and reasons like a principal engineer: *given this pattern at 1M, what's required and missing?* Event-driven on an in-process `EventEmitter` with no Kafka/RabbitMQ → gate. Background work in the request path with no BullMQ/Celery worker → gate. No cache, no connection pool → gate.
+   - **Researches the live internet** — one low-context, web-grounded pass (like a principal engineer who *looks it up*): the current stable versions, today's best-practice tooling for your pattern at scale, and known CVEs/advisories — each recommendation carrying a **source URL**. (e.g. *"current field default is BullMQ v5.71 on Redis — source: bullmq.io"*.)
    - **Scale & resilience** — scales-to-1M and error-tolerance checks (N+1, unbounded queries, no timeouts/retries/validation, in-memory state).
    - **Frontend at 1M DAU** — raw `<img>`, heavy client bundles, fetch waterfalls, unvirtualized lists.
    - **Live attack** — boots your app and runs a bounded, localhost-only probe that *proves* the cost-bomb (no `429` under a burst), auth bypass, missing headers, stack-trace leakage.

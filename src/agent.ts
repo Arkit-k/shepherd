@@ -11,6 +11,7 @@ import { printReport, type Finding } from "./engine/report.js";
 import { recordScan } from "./engine/ledger.js";
 import { analyzeArchitecture } from "./engine/backend/architecture.js";
 import { analyzeProduction } from "./engine/backend/production.js";
+import { researchProduction } from "./engine/research.js";
 import { scaleAndResilience } from "./engine/backend/scale.js";
 import { frontendScale } from "./engine/frontend/scale.js";
 import { liveProbe } from "./engine/backend/probe.js";
@@ -94,6 +95,18 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
     ),
   );
 
+  // research the live internet (one low-context call) like a principal engineer:
+  // current versions, today's best-practice tooling, known advisories.
+  let researchFindings: Finding[] = [];
+  if (hasClaude) {
+    console.log(pc.dim("  Researching current best practice on the web (this one's slower) …"));
+    researchFindings = researchProduction(repo, {
+      tech,
+      patterns: production.patterns,
+      infra: production.infra,
+    });
+  }
+
   const scaleFindings = scaleAndResilience(repo, { deep: hasClaude });
   const feFindings = frontendScale(repo, { deep: hasClaude });
   const live = await liveProbe(repo);
@@ -116,6 +129,7 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
     ...audit.findings,
     ...architecture.findings,
     ...production.findings,
+    ...researchFindings,
     ...scaleFindings,
     ...feFindings,
     ...live,
