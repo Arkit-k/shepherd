@@ -10,6 +10,7 @@ import { betterPatterns } from "./idioms.js";
 import { designPatterns } from "./design-patterns.js";
 import { scaleAndResilience } from "./backend/scale.js";
 import { frontendScale } from "./frontend/scale.js";
+import { devopsChecks } from "./devops.js";
 import { recordScan } from "./ledger.js";
 import { printReport, dedupeFindings, type Finding } from "./report.js";
 
@@ -41,6 +42,7 @@ export async function scan(root: string, opts: ScanOptions = {}): Promise<ScanRe
     ...designPatterns(repo, { deep: false }), // design patterns + trade-offs
     ...scaleAndResilience(repo, { deep: false }), // scale/resilience heuristics
     ...frontendScale(repo, { deep: false }), // frontend-at-scale heuristics
+    ...devopsChecks(repo), // DevOps: GitHub Actions, nginx, Jenkins, IaC, compose
   ]);
 
   if (opts.deep) {

@@ -59,6 +59,30 @@ const RULES: Rule[] = [
     match: (f) => has(f, /npm-audit|npm audit|known.*vulnerab|critical.*vulnerab|\bcve\b/i),
   },
   {
+    title: "Cloud resource open to the internet (0.0.0.0/0)",
+    priority: 1,
+    weight: 1,
+    match: (f) => has(f, /iac-open-to-world|0\.0\.0\.0\/0|open to the entire internet/i),
+  },
+  {
+    title: "Public storage bucket / cloud secret in IaC",
+    priority: 1,
+    weight: 1,
+    match: (f) => has(f, /iac-public-bucket|iac-hardcoded-key|public bucket|public-read/i),
+  },
+  {
+    title: "CI pipeline command injection / secret exfiltration",
+    priority: 2,
+    weight: 1,
+    match: (f) => has(f, /gha-script-injection|gha-pr-target|command-injection|pull_request_target/i),
+  },
+  {
+    title: "Weak TLS / insecure edge config",
+    priority: 3,
+    weight: 1,
+    match: (f) => has(f, /nginx-weak-tls|weak tls|sslv3|tlsv1\.1/i),
+  },
+  {
     title: "Unprotected expensive/AI endpoint (needs auth + rate limit)",
     priority: 2,
     weight: 2,
