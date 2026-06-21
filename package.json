@@ -1,0 +1,29 @@
+{
+  "name": "shepherd",
+  "version": "0.0.1",
+  "description": "Production-readiness gate for AI-written code — you code, we shepherd it to production.",
+  "type": "module",
+  "bin": {
+    "shepherd": "./dist/cli.js",
+    "shepherd-mcp": "./dist/mcp.js"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "mcp": "tsx src/mcp.ts",
+    "build": "tsc",
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "commander": "^12.1.0",
+    "fast-glob": "^3.3.2",
+    "picocolors": "^1.1.0",
+    "ts-morph": "^23.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

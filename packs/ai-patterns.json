@@ -1,0 +1,44 @@
+{
+  "name": "ai-patterns",
+  "description": "Tell-tale patterns AI codegen commonly leaves behind. This pack is the moving target — extend it as AI tools change.",
+  "rules": [
+    {
+      "id": "ts-suppression",
+      "pattern": "@ts-(ignore|nocheck)",
+      "severity": "warn",
+      "gate": false,
+      "message": "@ts-ignore / @ts-nocheck suppresses a real type error instead of fixing it — a classic AI escape hatch.",
+      "tool": "ai"
+    },
+    {
+      "id": "any-type",
+      "pattern": ":\\s*any(\\b|\\[)",
+      "filePattern": "\\.(ts|tsx)$",
+      "severity": "info",
+      "gate": false,
+      "message": "Explicit `any` defeats type safety — AI reaches for it when unsure of the real type."
+    },
+    {
+      "id": "leftover-console",
+      "pattern": "console\\.(log|debug)\\(",
+      "severity": "info",
+      "gate": false,
+      "message": "Leftover console.log/debug — AI scaffolding output left in production code."
+    },
+    {
+      "id": "todo-marker",
+      "pattern": "(TODO|FIXME|HACK)\\b",
+      "severity": "info",
+      "gate": false,
+      "message": "Unresolved TODO/FIXME/HACK marker."
+    },
+    {
+      "id": "empty-catch",
+      "pattern": "catch\\s*\\([^)]*\\)\\s*\\{\\s*\\}",
+      "severity": "warn",
+      "gate": false,
+      "message": "Empty catch block swallows errors silently — AI writes these to make code 'work'.",
+      "tool": "ai"
+    }
+  ]
+}

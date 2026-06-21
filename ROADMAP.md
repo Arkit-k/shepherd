@@ -1,0 +1,100 @@
+# Shepherd — Build Roadmap
+
+Build the **engine** once; the CLI and App are thin shells over it. Each phase is shippable.
+Stack: **TypeScript + Node**, distributed via `npm`. Targets JS/TS apps (Next.js + Supabase etc.).
+
+## ✅ Progress (2026-06-21)
+- Layer 0 ingest + Layer 1 AST backbone (`ts-morph`) — **done, runs on real repos**
+- Layer 2 family 2 (measurable SOLID: file-size, long-function, god-class) — **done**
+- Layer 2 family 1 (security: cost-bomb, secrets, unauthed-route, localhost) — **done; catches the validated `/api/ai-chat` cost-bomb in windback-fe automatically**
+- Loop engineering (`loop.ts`): detect → fix → re-verify → repeat, 4 stopping conditions, pluggable per-file `Fixer` — **done**
+- Fixers: `PlaceholderFixer` + `ClaudeFixer` (spawns user's Claude Code headless) — **done**
+- **MCP server** (`mcp.ts`): exposes `scan` as a tool so Claude Code can drive Shepherd — **done & verified**
+- **Layer 2 family 3 — deep review** (`deep-review.ts`, `--deep`): Claude reviews security-sensitive files on the USER'S account for what regex can't catch — **done & verified** (caught prompt-injection/role-spoofing, unbounded input, missing fetch timeout in ai-chat)
+- Test integration (`tests.ts`, `--with-tests`): runs the project's own test suite as a gate — **done**
+- `shepherd init`: auto-registers the MCP server with Claude Code — **done**
+- Windows fix: Claude prompts go via STDIN (passing as a CLI arg hangs cmd.exe) — **done**
+- Verified end-to-end: Tier 1 (hardcoded) catches cost-bomb/localhost; **Tier 2 (Claude `--deep`) catches prompt-injection & unbounded inputs** (~$0.05/file on the user's Claude account)
+- **Phase ① Understand** (`tech-stack.ts`, `understand.ts`, `shepherd understand [--deep]`): monorepo-aware stack+version detection, and a Claude architecture summary + soft spots from a cheap map — **done & verified** (correctly identified the BFF-proxy pattern, hand-rolled auth, contract-drift risk, even duplicate callback routes)
+- **Modernity check** (`modernity.ts`, `shepherd modernity [--deep]`): Tier 1 compares deps vs the npm registry (flagged Next 15→16, TS 5→6 behind); Tier 2 Claude flags deprecated/old code patterns — **done; Tier 1 verified live**
+- **Deep-review broadened** to security/performance/architecture/logic (categorized findings) — **done & verified**: caught a billing-bypass (client-only tier gating), an enterprise-tier limit bug (highest tier → lowest cap), React re-render perf, and pricing-logic drift in windback
+- **Moat infrastructure** (`ledger.ts`, `rules/`, `packs/ai-patterns.json`, `shepherd stats`) — **done & verified**:
+  - #1 data flywheel: every scan → anonymized ledger; `stats` ranks the checklist by real-world frequency (cloner starts at zero data)
+  - #2 AI-tool rule packs: open JSON format, `ai-patterns` pack firing (leftover-console, empty-catch, @ts-ignore) — ship per-tool packs, update weekly
+  - #5 community: packs are plain JSON in `~/.shepherd/packs/`
+  - #3 brand: the ledger is the dataset for a "State of AI-Built Code" report
+- **Next:** the **GitHub App** (monetization + lock-in surface #4 — same engine, server-side, your API, fix PRs on push)
+
+### Two integration paths (both built)
+- **Claude Code drives (MCP):** `claude mcp add shepherd -- node <path>/dist/mcp.js` → ask Claude to "scan and harden with shepherd"
+- **Shepherd drives (CLI):** `npx shepherd --fix` → spawns Claude Code per file via `ClaudeFixer`
+
+---
+
+## Phase 0 — Engine scaffold
+- [ ] `npm` package `prodgate` (TypeScript). Monorepo or single package.
+- [ ] Module structure:
+  ```
+  src/
+    engine/
+      detectors/     # deterministic checks (one file per check)
+      dynamic/       # curl-flood, runtime probes
+      fixers/        # LLM-driven fix generation
+      report.ts      # findings model: {id, severity, file, line, gate|advise, message}
+      run.ts         # orchestrates: detect → triage → (fix)
+    shells/
+      cli.ts         # local runner
+      app/           # GitHub App (later)
+  ```
+- [ ] Findings schema + severity (🔴/🟠/🟡) + `gate` vs `advise` flag.
+
+## Phase 1 — v1 detectors (deterministic, no LLM)
+Build the checks in `CHECKLIST.md` §v1. All cheap, exhaustive, free:
+- [ ] Secrets in client bundle (regex + `gitleaks`)
+- [ ] Cost-bomb endpoints (AI/email routes w/o rate limit or auth)  ← **check #1, already validated**
+- [ ] Unauthed API routes
+- [ ] Authorization / IDOR (flag `:id` routes without ownership check)
+- [ ] File size + cyclomatic complexity thresholds
+- [ ] Hardcoded localhost
+- [ ] Dependency CVEs (`npm audit`)
+- [ ] Output a clean report (🔴 N critical …)
+
+## Phase 2 — CLI shell
+- [ ] `npx prodgate` / `npm i -g prodgate` runs detectors against a local repo
+- [ ] Modes: scan-only (free), fix (needs a model)
+- [ ] Model resolution: detect Claude Code installed → use it; else BYOK key; else scan-only
+- [ ] Test against a real AI-built repo (start with `windback-fe`)
+
+## Phase 3 — Fix layer (LLM)
+- [ ] Given a finding + relevant files, generate a patch (Claude Opus 4.8, effort high)
+- [ ] Haiku triage pass ("is this real / worth fixing?") before the expensive fix
+- [ ] Output: a PR (App) or a paste-able block / Claude Code handoff (CLI)
+- [ ] Prompt caching on the checklist prefix to cut cost
+
+## Phase 4 — GitHub App shell (monetization)
+- [ ] GitHub App: install flow, permissions (Contents R/W, PRs write)
+- [ ] On push/PR webhook → read repo → run engine → open fix PR (never push to main)
+- [ ] Uses YOUR Anthropic API key
+- [ ] Free tier = scan only; paid tier = fixes
+
+## Phase 5 — Billing & tiers
+- [ ] Free (scan) / Solo ₹699 BYOK / Team $15-seat or $29-project / Agency ₹20k+
+- [ ] Per-seat or quota+overage on Team (never unlimited-flat — API is your variable cost)
+- [ ] BYOK option to zero-out inference for users who bring a key
+
+## Phase 6 — Dynamic checks + v2
+- [ ] Curl-flood → live rate-limit detection (the dynamic differentiator)
+- [ ] Response-time (server vs client), DB query count (N+1)
+- [ ] Supabase pooler / connection-limit check
+- [ ] Advisory: architecture, server-vs-client, scaling (1M benchmark)
+
+## v3 (later)
+- [ ] Autonomous coder + verifier loop ("managing Claude")
+- [ ] Multi-region / cost-optimization advisory
+- [ ] Managed/done-for-you Agency tier tooling
+
+---
+
+### Build principle
+Don't build the logic twice. The engine is the company; the CLI and App just call it.
+Block a merge only on measurable findings; everything subjective is advisory.
