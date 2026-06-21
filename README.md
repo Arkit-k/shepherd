@@ -45,12 +45,17 @@ One run dispatches a sequence of agents — the way a senior engineer reviews a 
 
 ## How the hand-off works
 
-Shepherd is the maintainer. It finds the problems and writes the prompt; your Claude Code session does the editing, so you stay in control:
+Shepherd is the maintainer. It finds the problems and writes the prompt; your Claude Code session does the editing, so you stay in control. Three ways, from manual to zero-touch:
 
-- **In your open session**, say: *“apply the fixes in `.shepherd/fix-order.md`.”*
-- **Or via MCP** (`shepherd init` wires Shepherd in as a tool): ask Claude to *“get the shepherd fix order and apply it”* — the `fix_order` tool returns the work-order, your session applies it, then calls `scan` to verify.
+- **Manual** — in your open session, say: *“apply the fixes in `.shepherd/fix-order.md`.”*
+- **MCP pull** (`shepherd init`): ask Claude to *“get the shepherd fix order and apply it”* — the `fix_order` tool returns the work-order, your session applies it, then calls `scan` to verify.
+- **Zero-touch push (Channels)** — start your session with:
+  ```bash
+  claude --dangerously-load-development-channels server:shepherd
+  ```
+  Now any `npx shepherd` run writes the work-order and Shepherd **pushes it straight into that session** — Claude wakes up, reads `.shepherd/fix-order.md`, and applies it. No typing.
 
-> There's no reliable way to type into an already-running terminal session, so Shepherd writes the order and your session picks it up. (A fully hands-free push using Claude Code **Channels** is on the roadmap.)
+> Channels are a Claude Code research-preview feature (v2.1.80+); the `--dangerously-load-development-channels` flag is required while it's in preview. There's no supported way to type into a running terminal session directly — Channels is the official push mechanism.
 
 ## It tracks your project (like `.claude/`)
 

@@ -1,31 +1,49 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { watch, existsSync, statSync } from "node:fs";
+import path from "node:path";
 import { z } from "zod";
 import { scan } from "./engine/run.js";
 import { buildFixOrder, writeFixOrder } from "./engine/handoff.js";
 
 // Shepherd as an MCP server — this is how Claude Code "wires in".
-// Claude Code drives: it calls `scan`, gets a compact structured findings list
-// (not pasted code), fixes the gating files with its own tools, then calls
-// `scan` again to verify. Shepherd's job is just to be the checker.
-const server = new McpServer({ name: "shepherd", version: "0.0.1" });
+//
+// Two ways it works:
+//  • PULL — Claude Code calls `scan` / `fix_order`, gets a compact work-order,
+//    and applies the fixes itself.
+//  • PUSH (Channels, research preview) — Shepherd declares a channel capability
+//    and watches `.shepherd/fix-order.md`. When any `npx shepherd` run writes a
+//    new work-order, Shepherd PUSHES it into the running Claude Code session, so
+//    it wakes up and applies the fixes with zero typing.
+//
+// Shepherd never edits code itself — it is the maintainer that hands off work.
+const server = new McpServer(
+  { name: "shepherd", version: "0.0.1" },
+  {
+    capabilities: {
+      experimental: { "claude/channel": {} }, // makes this a push channel
+    },
+    instructions:
+      'Shepherd is a production-readiness maintainer. Work orders arrive as ' +
+      '<channel source="shepherd" ...> messages pointing at .shepherd/fix-order.md. ' +
+      "When one arrives, read that file and apply the listed fixes as minimal diffs, " +
+      "then call the `scan` tool with only_blocking=true to verify the gates are closed.",
+  },
+);
 
 server.tool(
   "scan",
   "Scan a repository for production-readiness issues — security (cost-bomb endpoints, exposed secrets, unauthed API routes, hardcoded localhost) and code quality / measurable SOLID smells (oversized files, overly long functions, god-classes). Returns structured findings. Workflow: run scan, fix every finding where gate=true, then run scan again to verify it's shipshape.",
   {
-    path: z
-      .string()
-      .default(".")
-      .describe("Path to the repo to scan (default: current directory)."),
+    path: z.string().default(".").describe("Path to the repo to scan (default: current directory)."),
     only_blocking: z
       .boolean()
       .default(false)
       .describe("Return only blocking (gate=true) findings — use when re-verifying after a fix to keep context minimal."),
   },
-  async ({ path, only_blocking }) => {
-    const { repo, findings } = await scan(path);
+  async ({ path: p, only_blocking }) => {
+    const { repo, findings } = await scan(p);
     const blocking = findings.filter((f) => f.disposition === "gate");
     const shown = only_blocking ? blocking : findings;
 
@@ -59,8 +77,8 @@ server.tool(
   {
     path: z.string().default(".").describe("Path to the repo (default: current directory)."),
   },
-  async ({ path }) => {
-    const { repo, findings } = await scan(path);
+  async ({ path: p }) => {
+    const { repo, findings } = await scan(p);
     const gates = findings.filter((f) => f.disposition === "gate");
     if (gates.length === 0) {
       return { content: [{ type: "text", text: "✅ No blocking issues — nothing to fix." }] };
@@ -76,5 +94,65 @@ server.tool(
   },
 );
 
+// ── Channels push: watch .shepherd/fix-order.md and push when it changes ──────
+function startChannelWatch(): void {
+  const projectDir = process.cwd();
+  const shepherdDir = path.join(projectDir, ".shepherd");
+  const orderPath = path.join(shepherdDir, "fix-order.md");
+  let lastMtime = 0;
+  const dbg = (m: string) => {
+    if (process.env.SHEPHERD_DEBUG) console.error(`[shepherd-channel] ${m}`);
+  };
+  dbg(`watching ${orderPath}`);
+
+  const push = () => {
+    try {
+      if (!existsSync(orderPath)) return dbg("push: no order file");
+      const mtime = statSync(orderPath).mtimeMs;
+      if (mtime === lastMtime) return dbg("push: unchanged mtime"); // dedupe repeated fs events
+      lastMtime = mtime;
+      dbg("push: sending channel notification");
+      // fire-and-forget; if the session isn't listening it drops silently.
+      void server.server.notification({
+        method: "notifications/claude/channel",
+        params: {
+          content:
+            "Shepherd produced a new fix work-order. Read `.shepherd/fix-order.md` and apply the " +
+            "listed fixes as minimal diffs, then call the `scan` tool with only_blocking=true to verify.",
+          meta: { source: "shepherd", order: ".shepherd/fix-order.md" },
+        },
+      });
+    } catch {
+      /* channels are best-effort / research preview */
+    }
+  };
+
+  let timer: NodeJS.Timeout | null = null;
+  const debounced = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(push, 500);
+  };
+
+  const arm = () => {
+    if (!existsSync(shepherdDir)) {
+      dbg(".shepherd missing — retry in 5s");
+      setTimeout(arm, 5000); // wait for the folder to appear, then watch
+      return;
+    }
+    try {
+      watch(shepherdDir, (_event, filename) => {
+        dbg(`fs event: ${filename}`);
+        if (filename === "fix-order.md") debounced();
+      });
+      dbg("armed watch on .shepherd");
+      push(); // push once if an order already exists at startup
+    } catch (e) {
+      dbg(`watch failed: ${String(e)}`);
+    }
+  };
+  arm();
+}
+
 const transport = new StdioServerTransport();
 await server.connect(transport);
+startChannelWatch();

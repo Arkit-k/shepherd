@@ -36,7 +36,11 @@ export function registerMcp(root = "."): void {
   try {
     execSync(addCmd, { stdio: "inherit" });
     console.log("\n✅ Shepherd is wired into Claude Code.");
-    console.log('   In Claude Code, ask: "scan and harden this repo with shepherd".');
+    console.log('   • Pull:  in Claude Code, ask "get the shepherd fix order and apply it".');
+    console.log("   • Push (zero-touch, research preview): start your session with");
+    console.log("       claude --dangerously-load-development-channels server:shepherd");
+    console.log("     Then any `npx shepherd` run pushes the fix work-order straight into");
+    console.log("     that session — it wakes up and applies it. No typing.");
   } catch {
     console.log("⚠️  Auto-registration failed. Add it manually:");
     console.log("   " + addCmd);
