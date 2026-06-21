@@ -1,13 +1,10 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { run } from "./engine/run.js";
-import { fixLoop } from "./engine/loop.js";
-import { claudeAvailable, ClaudeFixer } from "./engine/fixers/claude.js";
-import { PlaceholderFixer } from "./engine/fixers/placeholder.js";
+import { run, scan } from "./engine/run.js";
+import { buildFixOrder, writeFixOrder } from "./engine/handoff.js";
 import { registerMcp } from "./init.js";
 import { printBanner } from "./banner.js";
 import { runAgent } from "./agent.js";
-import type { Finding } from "./engine/report.js";
 
 const program = new Command();
 program
@@ -16,14 +13,13 @@ program
   .version("0.0.1");
 
 // shepherd [path]   (default) — the autonomous agent. No flags to learn:
-// survey → modernity → audit → fix, end-to-end on the user's own Claude.
+// survey → modernity → audit → backend → hand-off, on the user's own Claude.
 program
   .command("run [path]", { isDefault: true })
-  .description("Autonomous run: survey, audit, and fix your repo on your Claude")
-  .option("--no-fix", "audit only — don't apply fixes")
-  .action(async (p = ".", opts: { fix?: boolean }) => {
+  .description("Autonomous run: survey, audit, stress-test, then hand a fix order to your Claude Code")
+  .action(async (p = ".") => {
     await printBanner();
-    process.exitCode = await runAgent(p, { autoFix: opts.fix !== false });
+    process.exitCode = await runAgent(p);
   });
 
 // shepherd scan [path]   (power users — audit only, no fix loop)
@@ -37,25 +33,26 @@ program
     process.exitCode = findings.some((f) => f.disposition === "gate") ? 1 : 0;
   });
 
-// shepherd fix [path] --with-tests
+// shepherd handoff [path]   — write a fix work-order for your Claude Code session.
+// Shepherd never edits code; it hands the prompt to your own session.
 program
-  .command("fix [path]")
-  .description("Run the agent loop: detect → Claude fixes → re-verify until shipshape")
-  .option("--max-iterations <n>", "max loop iterations", "5")
-  .option("--with-tests", "also run the project's test suite as a gate")
-  .option("--deep", "add a Claude-powered aggressive review each iteration")
-  .action(async (p = ".", opts: { maxIterations: string; withTests?: boolean; deep?: boolean }) => {
+  .command("handoff [path]")
+  .description("Write a fix work-order (.shepherd/fix-order.md) for your Claude Code session to apply")
+  .option("--deep", "add a Claude-powered aggressive review before writing the order")
+  .action(async (p = ".", opts: { deep?: boolean }) => {
     await printBanner();
-    const fixer = claudeAvailable() ? new ClaudeFixer() : new PlaceholderFixer();
-    if (fixer.name === "placeholder") {
-      console.log("⚠️  Claude Code not found on PATH — running the loop in dry mode (no fixes applied).");
+    const ts = new Date().toISOString();
+    const { repo, findings } = await scan(p, { deep: Boolean(opts.deep) });
+    const gates = findings.filter((f) => f.disposition === "gate");
+    if (gates.length === 0) {
+      console.log("✅ No blocking issues — nothing to hand off.");
+      process.exitCode = 0;
+      return;
     }
-    const gates: Finding[] = await fixLoop(p, fixer, {
-      maxIterations: Number(opts.maxIterations),
-      withTests: Boolean(opts.withTests),
-      deep: Boolean(opts.deep),
-    });
-    process.exitCode = gates.some((f) => f.disposition === "gate") ? 1 : 0;
+    const orderPath = writeFixOrder(repo.root, buildFixOrder(gates, ts));
+    console.log(`📝 Wrote ${orderPath.replace(/\\/g, "/")} (${gates.length} blocking).`);
+    console.log(`   In your Claude Code session, say:  apply the fixes in ${orderPath.replace(/\\/g, "/")}`);
+    process.exitCode = 1;
   });
 
 // shepherd understand [path] [--deep]   (orient: tech stack + Claude architecture summary)

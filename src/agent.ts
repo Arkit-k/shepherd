@@ -5,8 +5,8 @@ import { detectStack, printStack } from "./engine/tech-stack.js";
 import { understandArchitecture } from "./engine/understand.js";
 import { outdatedDependencies, reviewModernity } from "./engine/modernity.js";
 import { scan } from "./engine/run.js";
-import { fixLoop } from "./engine/loop.js";
-import { claudeAvailable, ClaudeFixer } from "./engine/fixers/claude.js";
+import { claudeAvailable } from "./engine/fixers/claude.js";
+import { buildFixOrder, writeFixOrder, claudeSessionRunning } from "./engine/handoff.js";
 import { printReport, type Finding } from "./engine/report.js";
 import { recordScan } from "./engine/ledger.js";
 import { analyzeArchitecture } from "./engine/backend/architecture.js";
@@ -19,7 +19,7 @@ import { writeReport } from "./engine/report-file.js";
 import { loadProject } from "./engine/project.js";
 
 interface AgentOptions {
-  autoFix?: boolean; // apply fixes automatically (default true)
+  // reserved for future flags; Shepherd never edits code itself.
 }
 
 function phase(n: number, title: string, agent: string): void {
@@ -32,10 +32,10 @@ function phase(n: number, title: string, agent: string): void {
 }
 
 // The autonomous run. No subcommands, no flags to remember — the user runs
-// `shepherd` and walks away. Shepherd surveys, audits, and (if Claude is
-// present) fixes the repo end-to-end on the user's own Claude session.
-export async function runAgent(root = ".", opts: AgentOptions = {}): Promise<number> {
-  const autoFix = opts.autoFix !== false;
+// `shepherd` and walks away. Shepherd surveys, audits, and stress-tests the
+// repo, then hands a precise fix work-order to the user's OWN Claude Code
+// session. Shepherd is the maintainer; it never edits the code itself.
+export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<number> {
   const hasClaude = claudeAvailable();
   const ts = new Date().toISOString(); // injected into the report (engine stays pure)
 
@@ -139,51 +139,39 @@ export async function runAgent(root = ".", opts: AgentOptions = {}): Promise<num
 
   const gates = findings.filter((f) => f.disposition === "gate");
 
-  // ⑤ Fixer — close the gates on the user's Claude, then re-verify.
+  // ⑤ Hand-off — Shepherd is the maintainer, not the editor. It writes a precise
+  //    fix work-order and hands it to the user's OWN Claude Code session.
   if (gates.length === 0) {
     console.log(pc.green("\n  ✅ No blocking issues. Shepherd says: shipshape.\n"));
     return 0;
   }
 
-  if (!hasClaude) {
-    console.log(
-      pc.yellow(
-        `\n  ${gates.length} blocking issue(s) found. Install Claude Code and re-run, ` +
-          `or fix them by hand — Shepherd held the gate.\n`,
-      ),
-    );
-    return 1;
+  phase(5, "Hand-off", "Maintainer");
+  let orderPath = ".shepherd/fix-order.md";
+  try {
+    orderPath = writeFixOrder(root, buildFixOrder(gates, ts));
+  } catch {
+    /* best-effort */
   }
+  const sessionLive = claudeSessionRunning();
 
-  if (!autoFix) {
-    console.log(
-      pc.yellow(
-        `\n  ${gates.length} blocking issue(s) found. Re-run without --no-fix to let ` +
-          `Shepherd close them automatically.\n`,
-      ),
-    );
-    return 1;
-  }
-
-  phase(5, "Fix", "Fixer");
   console.log(
-    pc.dim("  Handing the gates to your Claude. Files are edited in place — your repo is\n  git-tracked, so every change is reviewable and reversible.\n"),
-  );
-  const remaining = await fixLoop(root, new ClaudeFixer(), {
-    maxIterations: 5,
-    deep: true,
-  });
-
-  const stillBlocking = remaining.filter((f) => f.disposition === "gate");
-  if (stillBlocking.length === 0) {
-    console.log(pc.green("\n  ✅ Shepherd closed every gate. Shipshape.\n"));
-    return 0;
-  }
-  console.log(
-    pc.yellow(
-      `\n  Shepherd fixed what it could; ${stillBlocking.length} issue(s) need a human. ` +
-        `They're listed above.\n`,
+    pc.dim(
+      `  Shepherd doesn't edit your code — it wrote a fix work-order for your Claude Code\n` +
+        `  session to execute, so every change stays under your review.\n`,
     ),
+  );
+  console.log(`  📝 Work-order: ${pc.bold(orderPath.replace(/\\/g, "/"))} (${gates.length} blocking)`);
+  console.log(
+    pc.bold("\n  Hand it to your Claude Code session:") +
+      (sessionLive ? pc.green("  (a Claude session is running ✓)") : "") +
+      "\n" +
+      pc.dim("    • In your open session, say:  ") +
+      pc.whiteBright(`apply the fixes in ${orderPath.replace(/\\/g, "/")}`) +
+      "\n" +
+      pc.dim("    • Or, if Shepherd's MCP is wired (`shepherd init`):  ") +
+      pc.whiteBright("ask Claude to “get the shepherd fix order and apply it”") +
+      "\n",
   );
   return 1;
 }

@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { scan } from "./engine/run.js";
+import { buildFixOrder, writeFixOrder } from "./engine/handoff.js";
 
 // Shepherd as an MCP server — this is how Claude Code "wires in".
 // Claude Code drives: it calls `scan`, gets a compact structured findings list
@@ -46,6 +47,32 @@ server.tool(
     };
 
     return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
+  },
+);
+
+// The hand-off tool. Shepherd is the maintainer: it never edits code. This tool
+// scans the repo and returns a precise fix WORK-ORDER (the prompt) for THIS
+// Claude Code session to execute itself, then it should re-run `scan` to verify.
+server.tool(
+  "fix_order",
+  "Get Shepherd's fix work-order for a repo: scans for blocking (gate) production-readiness issues and returns precise, file-by-file instructions for YOU (this Claude Code session) to apply. Shepherd does not edit code — it hands you the order. After applying, call `scan` with only_blocking=true to verify the gates are closed. Also writes the order to .shepherd/fix-order.md.",
+  {
+    path: z.string().default(".").describe("Path to the repo (default: current directory)."),
+  },
+  async ({ path }) => {
+    const { repo, findings } = await scan(path);
+    const gates = findings.filter((f) => f.disposition === "gate");
+    if (gates.length === 0) {
+      return { content: [{ type: "text", text: "✅ No blocking issues — nothing to fix." }] };
+    }
+    const ts = new Date().toISOString();
+    const order = buildFixOrder(gates, ts);
+    try {
+      writeFixOrder(repo.root, order);
+    } catch {
+      /* still return the order even if the file write fails */
+    }
+    return { content: [{ type: "text", text: order }] };
   },
 );
 

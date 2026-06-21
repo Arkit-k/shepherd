@@ -11,18 +11,18 @@
 
 ---
 
-AI tools (Lovable, Bolt, v0, Cursor, Claude) ship working apps fast — and quietly leave behind cost-bombs, missing auth, client-only access control, outdated patterns, and architectural drift. Shepherd is the gate that catches what AI code specifically gets wrong, and fixes it. It runs continuously — on every push — not as a one-time audit.
+AI tools (Lovable, Bolt, v0, Cursor, Claude) ship working apps fast — and quietly leave behind cost-bombs, missing auth, client-only access control, outdated patterns, and architectural drift. Shepherd is the gate that catches what AI code specifically gets wrong. It runs continuously — on every push — not as a one-time audit.
 
 ```bash
 npx shepherd
 ```
 
-That's the whole interface. No flags, no subcommands to learn. Shepherd surveys your codebase, audits it, and fixes what it can — end to end — on your own Claude session. You run it and walk away.
+That's the whole interface. No flags, no subcommands to learn. Shepherd surveys your codebase, audits it, and stress-tests it — then **hands a precise fix work-order to your own Claude Code session** to apply. Shepherd is the maintainer; it never edits your code itself, so every change stays under your review.
 
 ## Why Shepherd
 
 - **It knows how *AI* code fails.** The detectors target the specific failure modes of generated code — public AI/email endpoints with no rate limit, secrets in the client bundle, access control enforced only on the frontend, deprecated libraries the model still reaches for.
-- **Detection is deterministic. Fixing is Claude.** Cheap, exhaustive, hardcoded checks find the problems (the moat); Claude is spent only on judgment — fixing and aggressive review.
+- **Shepherd maintains; your Claude Code edits.** Detection is deterministic (the moat). Shepherd never silently edits your code — it writes a precise fix work-order and hands it to *your* running Claude Code session, so every change happens under your eye.
 - **One engine, two shells.** The same engine runs as a **CLI** (on *your* Claude Code — free) and as a **GitHub App** (server-side, on our API — paid). Same checks everywhere.
 - **It learns.** Every scan feeds an anonymized ledger that ranks findings by real-world frequency. A code-cloner starts at zero data.
 
@@ -40,9 +40,16 @@ One run dispatches a sequence of agents — the way a senior engineer reviews a 
    - **Frontend at 1M DAU** — raw `<img>`, heavy client bundles, fetch waterfalls, unvirtualized lists.
    - **Live attack** — boots your app and runs a bounded, localhost-only probe that *proves* the cost-bomb (no `429` under a burst), auth bypass, missing headers, stack-trace leakage.
    - **Load test** — if Docker is present, stands up the real dependencies, runs a bounded ramp, finds the single-box ceiling, and **projects honestly** toward the target with the bottleneck named. (We measure and project — we don't pretend a laptop proves 1M req/s.)
-5. **Fixer** — hands each gate to your Claude, applies the fix, re-verifies, and repeats until clean or a human is needed.
+5. **Hand-off** — Shepherd writes the blocking issues into a precise fix work-order (`.shepherd/fix-order.md`) and hands it to **your own Claude Code session** to apply. It never edits your code itself.
 
-Files are edited in place; your repo is git-tracked, so every change is reviewable and reversible.
+## How the hand-off works
+
+Shepherd is the maintainer. It finds the problems and writes the prompt; your Claude Code session does the editing, so you stay in control:
+
+- **In your open session**, say: *“apply the fixes in `.shepherd/fix-order.md`.”*
+- **Or via MCP** (`shepherd init` wires Shepherd in as a tool): ask Claude to *“get the shepherd fix order and apply it”* — the `fix_order` tool returns the work-order, your session applies it, then calls `scan` to verify.
+
+> There's no reliable way to type into an already-running terminal session, so Shepherd writes the order and your session picks it up. (A fully hands-free push using Claude Code **Channels** is on the roadmap.)
 
 ## It tracks your project (like `.claude/`)
 
@@ -66,9 +73,9 @@ Most people never need these — `shepherd` does it all. But each agent is also 
 
 | Command | What it does |
 |---|---|
-| `shepherd` | **Autonomous run — survey, audit, backend probe, and fix (this is all you need)** |
-| `shepherd scan [path]` | Audit only, no fix loop (`--deep` for the Claude review) |
-| `shepherd fix [path]` | Just the fix loop: detect → fix → re-verify |
+| `shepherd` | **Autonomous run — survey, audit, backend probe, then hand off (this is all you need)** |
+| `shepherd scan [path]` | Audit only (`--deep` for the Claude review) |
+| `shepherd handoff [path]` | Write the fix work-order for your Claude Code session |
 | `shepherd probe [path]` | Just the live attack: boot the app + attack localhost |
 | `shepherd understand [--deep]` | Tech stack + Claude architecture summary |
 | `shepherd modernity [--deep]` | Outdated deps + deprecated code patterns |
@@ -77,8 +84,8 @@ Most people never need these — `shepherd` does it all. But each agent is also 
 
 ## Two ways to run it
 
-- **Shepherd drives (CLI):** `npx shepherd fix` spawns your Claude Code per file to apply fixes.
-- **Claude Code drives (MCP):** `shepherd init`, then ask Claude to *"scan and harden with shepherd."*
+- **Shepherd drives (CLI):** `npx shepherd` audits + stress-tests and writes the fix work-order; you hand it to your Claude Code session.
+- **Claude Code drives (MCP):** `shepherd init`, then ask Claude to *"get the shepherd fix order and apply it"* — your session pulls the order, applies it, and re-verifies with `scan`.
 
 ## Install
 
@@ -86,7 +93,7 @@ Most people never need these — `shepherd` does it all. But each agent is also 
 npm i -g shepherd      # or just use npx
 ```
 
-Requires Node 18+. Fixes and `--deep` review use [Claude Code](https://claude.com/claude-code) on your own account when present; without it, scanning still runs free.
+Requires Node 18+. The `--deep` reviews use [Claude Code](https://claude.com/claude-code) on your own account when present, and your own Claude Code session applies the fix work-order; without Claude, the deterministic scan still runs free.
 
 ## Status
 
