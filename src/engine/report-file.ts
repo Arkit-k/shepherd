@@ -71,6 +71,22 @@ function rateLimitMap(repo: Repo, findings: Finding[]): string {
   return ["| Route | Auth | Rate-limit | Live |", "|---|---|---|---|", ...rows].join("\n") + "\n";
 }
 
+// Surface the web-grounded research findings (file === "(researched)") in their
+// own section, splitting the inline "[source: url]" into a linked citation.
+function researchSection(findings: Finding[]): string {
+  const researched = findings.filter((f) => f.file === "(researched)");
+  if (researched.length === 0) {
+    return "_No web research this run (offline, no Claude Code, or `web:false` in config)._\n";
+  }
+  const sev = (s: Finding["severity"]) => (s === "critical" ? "🔴" : s === "warn" ? "🟡" : "🔵");
+  const lines = researched.map((f) => {
+    const m = f.message.match(/^(.*?)\s*\[source:\s*(.*?)\]\s*$/);
+    if (m) return `- ${sev(f.severity)} ${m[1]}  ([source](${m[2]}))`;
+    return `- ${sev(f.severity)} ${f.message}`;
+  });
+  return [`_Checked against the live internet — current versions, best-practice tooling, advisories:_`, ``, ...lines, ``].join("\n");
+}
+
 function loadTestSection(m?: LoadMetrics): string {
   if (!m || !m.ran) return `_Skipped — ${m?.note ?? "Docker not available / no server"}._\n`;
   const rows = m.stages.map(
@@ -120,6 +136,8 @@ function buildMarkdown(repo: Repo, s: ReportSections): string {
     `| Connection pooling | ${s.production.infra.pooling ? "✅" : "❌ none"} |`,
     `| Docker | ${s.production.infra.hasCompose ? "compose ✅" : s.production.infra.hasDockerfile ? "Dockerfile ✅" : "❌ none"} |`,
     ``,
+    `## Research (current best practice, with sources)`,
+    researchSection(s.findings),
     `## Rate-limit map`,
     rateLimitMap(repo, s.findings),
     `## Live attack probe`,
