@@ -115,11 +115,27 @@ program
     console.log("\nThis ranking is the moat: a code-cloner starts at zero.\n");
   });
 
-// shepherd init   (register the MCP server with Claude Code)
+// shepherd probe [path]   (power-user: just the live attack; the autonomous
+// run already does this — this is a shortcut for re-running only the probe)
 program
-  .command("init")
-  .description("Register Shepherd's MCP server with Claude Code")
-  .action(() => registerMcp());
+  .command("probe [path]")
+  .description("Boot the app and run the live attack probe (localhost only)")
+  .action(async (p = ".") => {
+    await printBanner();
+    const { liveProbe } = await import("./engine/backend/probe.js");
+    const { ingest } = await import("./engine/ingest.js");
+    const { printReport } = await import("./engine/report.js");
+    const repo = await ingest(p);
+    const findings = await liveProbe(repo);
+    printReport(findings);
+    process.exitCode = findings.some((f) => f.disposition === "gate") ? 1 : 0;
+  });
+
+// shepherd init   (install .shepherd/ + register the MCP server with Claude Code)
+program
+  .command("init [path]")
+  .description("Install .shepherd/ tracking + register Shepherd's MCP server with Claude Code")
+  .action((p = ".") => registerMcp(p));
 
 program
   .command("hello")

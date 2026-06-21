@@ -9,6 +9,11 @@ import { fixLoop } from "./engine/loop.js";
 import { claudeAvailable, ClaudeFixer } from "./engine/fixers/claude.js";
 import { printReport, type Finding } from "./engine/report.js";
 import { recordScan } from "./engine/ledger.js";
+import { analyzeArchitecture } from "./engine/backend/architecture.js";
+import { scaleAndResilience } from "./engine/backend/scale.js";
+import { liveProbe } from "./engine/backend/probe.js";
+import { writeReport } from "./engine/report-file.js";
+import { loadProject } from "./engine/project.js";
 
 interface AgentOptions {
   autoFix?: boolean; // apply fixes automatically (default true)
@@ -29,6 +34,7 @@ function phase(n: number, title: string, agent: string): void {
 export async function runAgent(root = ".", opts: AgentOptions = {}): Promise<number> {
   const autoFix = opts.autoFix !== false;
   const hasClaude = claudeAvailable();
+  const ts = new Date().toISOString(); // injected into the report (engine stays pure)
 
   console.log(
     hasClaude
@@ -43,9 +49,13 @@ export async function runAgent(root = ".", opts: AgentOptions = {}): Promise<num
   const model = buildModel(repo);
   console.log(pc.dim(`  Read ${repo.files.length} source files.`));
 
+  // first run installs .shepherd/ and tracks the project from here on.
+  loadProject(root);
+
   // ① Surveyor — what is this app, and what is it built with?
   phase(1, "Survey", "Surveyor");
-  printStack(detectStack(repo));
+  const tech = detectStack(repo);
+  printStack(tech);
   if (hasClaude) {
     console.log(pc.dim("\n  Reading the architecture …"));
     const summary = understandArchitecture(repo, model);
@@ -60,7 +70,26 @@ export async function runAgent(root = ".", opts: AgentOptions = {}): Promise<num
 
   // ③ Auditor — security / performance / architecture / logic.
   phase(3, "Audit", "Auditor");
-  const { findings } = await scan(root, { deep: hasClaude });
+  const audit = await scan(root, { deep: hasClaude });
+
+  // ④ Backend & Production-Readiness — architecture shape + comms correctness,
+  //    scale/resilience, and a live attack against the auto-started server.
+  phase(4, "Backend & Production-Readiness", "Architect · Stress · Striker");
+  console.log(pc.dim("  Classifying the backend and checking it scales / tolerates failure …"));
+  const architecture = analyzeArchitecture(repo);
+  console.log(
+    pc.dim(`  Shape: ${architecture.shape} · Comms: ${architecture.comms.join(", ") || "REST/HTTP"}`),
+  );
+  const scaleFindings = scaleAndResilience(repo, { deep: hasClaude });
+  const live = await liveProbe(repo);
+  const liveProbeRan = live.length > 0 || true; // attempted; probe logs if skipped
+
+  const findings: Finding[] = [
+    ...audit.findings,
+    ...architecture.findings,
+    ...scaleFindings,
+    ...live,
+  ];
   printReport(findings);
   try {
     if (!process.env.SHEPHERD_NO_LEDGER) recordScan(repo, findings);
@@ -68,9 +97,18 @@ export async function runAgent(root = ".", opts: AgentOptions = {}): Promise<num
     /* ledger is best-effort */
   }
 
+  // record the keep-able artifact + project tracking, no matter the verdict.
+  let reportPath = "";
+  try {
+    reportPath = writeReport(repo, { ts, tech, architecture, liveProbeRan, findings });
+  } catch {
+    /* report is best-effort */
+  }
+  if (reportPath) console.log(pc.dim(`\n  📄 Detailed report: ${reportPath.replace(/\\/g, "/")}`));
+
   const gates = findings.filter((f) => f.disposition === "gate");
 
-  // ④ Fixer — close the gates on the user's Claude, then re-verify.
+  // ⑤ Fixer — close the gates on the user's Claude, then re-verify.
   if (gates.length === 0) {
     console.log(pc.green("\n  ✅ No blocking issues. Shepherd says: shipshape.\n"));
     return 0;
@@ -96,7 +134,7 @@ export async function runAgent(root = ".", opts: AgentOptions = {}): Promise<num
     return 1;
   }
 
-  phase(4, "Fix", "Fixer");
+  phase(5, "Fix", "Fixer");
   console.log(
     pc.dim("  Handing the gates to your Claude. Files are edited in place — your repo is\n  git-tracked, so every change is reviewable and reversible.\n"),
   );

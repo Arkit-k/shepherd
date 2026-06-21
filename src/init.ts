@@ -2,11 +2,15 @@ import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { initProject } from "./engine/project.js";
 
-// `shepherd init` — register Shepherd's MCP server with Claude Code so Claude
-// can drive it as a tool. Uses Claude Code's own `mcp add` so it lands in the
-// right config; falls back to printing the manual command.
-export function registerMcp(): void {
+// `shepherd init` — install the `.shepherd/` tracking folder into the project
+// and register Shepherd's MCP server with Claude Code so Claude can drive it.
+export function registerMcp(root = "."): void {
+  const project = initProject(root);
+  console.log(`✅ Installed ${path.relative(root, project.dir) || ".shepherd"}/ — Shepherd will track this project here.`);
+  console.log("   (config.json, SHEPHERD.md tracked in git; history + reports gitignored.)\n");
+
   const here = path.dirname(fileURLToPath(import.meta.url));
   const mcpJs = path.join(here, "mcp.js"); // sibling of cli.js once built
   const addCmd = `claude mcp add shepherd -- node "${mcpJs}"`;

@@ -23,6 +23,13 @@ Stack: **TypeScript + Node**, distributed via `npm`. Targets JS/TS apps (Next.js
   - #2 AI-tool rule packs: open JSON format, `ai-patterns` pack firing (leftover-console, empty-catch, @ts-ignore) — ship per-tool packs, update weekly
   - #5 community: packs are plain JSON in `~/.shepherd/packs/`
   - #3 brand: the ledger is the dataset for a "State of AI-Built Code" report
+- **Backend & Production-Readiness stage** (`engine/backend/`, `report-file.ts`, `project.ts`) — **done & verified end-to-end**:
+  - **Architecture** (`backend/architecture.ts`): classifies monolith / microservices / serverless; detects tRPC / gRPC / GraphQL / queues; Claude reviews comms correctness (typed contracts, validation, retries/timeouts, service auth)
+  - **Scale & Resilience** (`backend/scale.ts`): Tier-1 heuristics (in-memory state, unbounded query, N+1, no try/catch, no fetch timeout, no input validation) + Claude deep pass — caught no-timeout, no-input-validation, client-per-request, no-max-tokens, no-idempotency on a live target
+  - **Live attack probe** (`backend/server.ts` + `backend/probe.ts`): auto-starts the dev server, fires bounded curl-style attacks on **localhost only** (rate-limit burst → *proves* the cost-bomb, auth bypass, security headers, error/stack-trace leakage), Claude grades the evidence, server always torn down. Verified: booted a target, proved the drainable LLM endpoint, freed the port cleanly
+  - **`.shepherd/` project tracking** (`project.ts`): installs per-project like `.claude/` — learned `config.json` (start cmd/port), `SHEPHERD.md` profile, `history.jsonl` trend, `reports/`, `baseline.json`
+  - **Detailed report** (`report-file.ts`): writes `.shepherd/reports/<ts>.md` (+ `latest.md`) with verdict, tech, architecture, rate-limit map, live results, full findings table
+  - All backend findings feed the existing **Fixer** so the autonomous run still closes the gates
 - **Next:** the **GitHub App** (monetization + lock-in surface #4 — same engine, server-side, your API, fix PRs on push)
 
 ### Two integration paths (both built)

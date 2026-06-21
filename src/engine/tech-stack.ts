@@ -23,8 +23,15 @@ const FRAMEWORKS: Record<string, string> = {
   fastify: "Fastify",
   "@nestjs/core": "NestJS",
   hono: "Hono",
+  koa: "Koa",
   "react-native": "React Native",
   expo: "Expo",
+  "@trpc/server": "tRPC",
+  "@grpc/grpc-js": "gRPC",
+  graphql: "GraphQL",
+  "@apollo/server": "Apollo GraphQL",
+  bullmq: "BullMQ",
+  kafkajs: "Kafka",
 };
 
 const DATABASES: Record<string, string> = {

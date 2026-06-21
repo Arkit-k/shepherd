@@ -28,14 +28,31 @@ That's the whole interface. No flags, no subcommands to learn. Shepherd surveys 
 
 ## The walk-through
 
-One run dispatches four agents in sequence — the way a senior engineer reviews a handoff:
+One run dispatches a sequence of agents — the way a senior engineer reviews a handoff:
 
 1. **Surveyor** — walks the codebase and states what it is and what it's built with.
 2. **Modernizer** — flags outdated dependencies and deprecated patterns AI tools still emit.
 3. **Auditor** — security, performance, architecture, and logic findings, split into **gates** (block the merge) and **advice**.
-4. **Fixer** — hands each gate to your Claude, applies the fix, re-verifies, and repeats until clean or a human is needed.
+4. **Backend & Production-Readiness** — classifies the backend (monolith / microservices / serverless), checks the comms style (tRPC / gRPC / GraphQL / queues) is done correctly, runs scale-to-1M and error-tolerance checks, then **boots your app and attacks it** — a bounded, localhost-only probe that *proves* the cost-bomb (no `429` under a burst), auth bypass, missing security headers, and stack-trace leakage.
+5. **Fixer** — hands each gate to your Claude, applies the fix, re-verifies, and repeats until clean or a human is needed.
 
 Files are edited in place; your repo is git-tracked, so every change is reviewable and reversible.
+
+## It tracks your project (like `.claude/`)
+
+On first run Shepherd installs a **`.shepherd/`** folder into your repo and tracks the project across runs:
+
+- `config.json` — the start command, port, and attack caps it learned (edit to override)
+- `SHEPHERD.md` — a living profile of your architecture and recurring soft spots
+- `reports/` — a detailed, keep-able report per run (`latest.md` always current)
+- `history.jsonl` — the trend over time (gates last week → 0 now)
+- `baseline.json` — findings you've accepted, so re-runs surface only what's *new*
+
+`config.json` and `SHEPHERD.md` are meant to be committed (team-shared); history and reports are gitignored by default.
+
+## Safety of the live probe
+
+The attack stage hits **localhost only**, against a server Shepherd itself starts, with hard request caps and per-request timeouts — bounded testing of your own app, never an external target, never unbounded. The server is always shut down afterward; if it can't boot, the probe is skipped and the run continues.
 
 ## Advanced: run a single phase
 
@@ -43,13 +60,14 @@ Most people never need these — `shepherd` does it all. But each agent is also 
 
 | Command | What it does |
 |---|---|
-| `shepherd` | **Autonomous run — survey, audit, and fix (this is all you need)** |
+| `shepherd` | **Autonomous run — survey, audit, backend probe, and fix (this is all you need)** |
 | `shepherd scan [path]` | Audit only, no fix loop (`--deep` for the Claude review) |
 | `shepherd fix [path]` | Just the fix loop: detect → fix → re-verify |
+| `shepherd probe [path]` | Just the live attack: boot the app + attack localhost |
 | `shepherd understand [--deep]` | Tech stack + Claude architecture summary |
 | `shepherd modernity [--deep]` | Outdated deps + deprecated code patterns |
 | `shepherd stats` | What Shepherd has learned across all scans |
-| `shepherd init` | Register Shepherd's MCP server with Claude Code |
+| `shepherd init [path]` | Install `.shepherd/` + register the MCP server |
 
 ## Two ways to run it
 
