@@ -39,10 +39,22 @@ const has = (f: Finding, re: RegExp) => re.test(f.id) || re.test(f.message);
 // must land in the same blocker so the critical path isn't noisy.
 const RULES: Rule[] = [
   {
+    title: "Secrets committed to git (.env tracked)",
+    priority: 1,
+    weight: 1,
+    match: (f) => has(f, /env-committed|\.env is committed|secrets are in history/i),
+  },
+  {
     title: "Exposed secret in source",
     priority: 1,
     weight: 1,
     match: (f) => has(f, /exposed-secret|hardcoded secret|secret.*(commit|source|env)|leaked? .*key/i),
+  },
+  {
+    title: "Known CVE in dependencies (npm audit)",
+    priority: 2,
+    weight: 1,
+    match: (f) => has(f, /npm-audit|npm audit|known.*vulnerab|critical.*vulnerab|\bcve\b/i),
   },
   {
     title: "Unprotected expensive/AI endpoint (needs auth + rate limit)",

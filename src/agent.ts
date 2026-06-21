@@ -7,6 +7,7 @@ import { outdatedDependencies, reviewModernity } from "./engine/modernity.js";
 import { betterPatterns } from "./engine/idioms.js";
 import { analyzeStructure, reviewStructure } from "./engine/structure.js";
 import { designPatterns } from "./engine/design-patterns.js";
+import { operationsChecks } from "./engine/operations.js";
 import { scan } from "./engine/run.js";
 import { claudeAvailable } from "./engine/fixers/claude.js";
 import { buildFixOrder, writeFixOrder, claudeSessionRunning } from "./engine/handoff.js";
@@ -127,6 +128,14 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
     },
   });
 
+  // operations & observability — is it OPERABLE? (error tracking, logging,
+  // health, graceful shutdown, .env hygiene, CI, Dockerfile, npm audit CVEs).
+  console.log(pc.dim("  Operations & observability checks (incl. npm audit) …"));
+  const opsFindings = operationsChecks(repo, {
+    microservices: architecture.shape === "microservices",
+    audit: true,
+  });
+
   const scaleFindings = scaleAndResilience(repo, { deep: hasClaude });
   const feFindings = frontendScale(repo, { deep: hasClaude });
   const live = await liveProbe(repo);
@@ -153,6 +162,7 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
     ...production.findings,
     ...researchFindings,
     ...designFindings,
+    ...opsFindings,
     ...scaleFindings,
     ...feFindings,
     ...live,
