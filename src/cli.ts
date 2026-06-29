@@ -1,145 +1,31 @@
 #!/usr/bin/env node
-import { Command } from "commander";
-import { run, scan } from "./engine/run.js";
-import { buildFixOrder, writeFixOrder } from "./engine/handoff.js";
-import { registerMcp } from "./init.js";
 import { printBanner } from "./banner.js";
+import { interactive } from "./interactive.js";
 import { runAgent } from "./agent.js";
 
-const program = new Command();
-program
-  .name("shepherd")
-  .description("Production-readiness gate for AI-written code")
-  .version("0.0.1");
+// Shepherd is an AGENT, not a set of programs. There are no subcommands to learn.
+//
+//   npx shepherd            → start Shepherd and talk to it (architecture review,
+//                             code/function review, full audit, fixes — just ask).
+//   npx shepherd ./some/dir → same, pointed at another repo.
+//
+// In a non-interactive context (CI, a pipe, no TTY) there's no one to talk to, so
+// Shepherd falls back to doing the whole job autonomously once — survey, audit,
+// stress-test, hand off — and exits non-zero if it's not production-ready.
+async function main(): Promise<void> {
+  const path = process.argv[2] && !process.argv[2].startsWith("-") ? process.argv[2] : ".";
+  const interactiveTTY = Boolean(process.stdin.isTTY && process.stdout.isTTY);
 
-// shepherd [path]   (default) — the autonomous agent. No flags to learn:
-// survey → modernity → audit → backend → hand-off, on the user's own Claude.
-program
-  .command("run [path]", { isDefault: true })
-  .description("Autonomous run: survey, audit, stress-test, then hand a fix order to your Claude Code")
-  .action(async (p = ".") => {
-    await printBanner();
-    process.exitCode = await runAgent(p);
-  });
+  await printBanner();
 
-// shepherd scan [path]   (power users — audit only, no fix loop)
-program
-  .command("scan [path]")
-  .description("Scan a repo for production-readiness issues")
-  .option("--deep", "add a Claude-powered aggressive review of security-sensitive files")
-  .action(async (p = ".", opts: { deep?: boolean }) => {
-    await printBanner();
-    const findings = await run(p, { deep: Boolean(opts.deep) });
-    process.exitCode = findings.some((f) => f.disposition === "gate") ? 1 : 0;
-  });
+  if (interactiveTTY) {
+    process.exitCode = await interactive(path);
+  } else {
+    process.exitCode = await runAgent(path);
+  }
+}
 
-// shepherd handoff [path]   — write a fix work-order for your Claude Code session.
-// Shepherd never edits code; it hands the prompt to your own session.
-program
-  .command("handoff [path]")
-  .description("Write a fix work-order (.shepherd/fix-order.md) for your Claude Code session to apply")
-  .option("--deep", "add a Claude-powered aggressive review before writing the order")
-  .action(async (p = ".", opts: { deep?: boolean }) => {
-    await printBanner();
-    const ts = new Date().toISOString();
-    const { repo, findings } = await scan(p, { deep: Boolean(opts.deep) });
-    const gates = findings.filter((f) => f.disposition === "gate");
-    if (gates.length === 0) {
-      console.log("✅ No blocking issues — nothing to hand off.");
-      process.exitCode = 0;
-      return;
-    }
-    const orderPath = writeFixOrder(repo.root, buildFixOrder(gates, ts));
-    console.log(`📝 Wrote ${orderPath.replace(/\\/g, "/")} (${gates.length} blocking).`);
-    console.log(`   In your Claude Code session, say:  apply the fixes in ${orderPath.replace(/\\/g, "/")}`);
-    process.exitCode = 1;
-  });
-
-// shepherd understand [path] [--deep]   (orient: tech stack + Claude architecture summary)
-program
-  .command("understand [path]")
-  .description("Walk the codebase: tech stack (+ --deep for a Claude architecture summary)")
-  .option("--deep", "add a Claude-written architecture summary + soft spots")
-  .action(async (p = ".", opts: { deep?: boolean }) => {
-    await printBanner();
-    const { ingest } = await import("./engine/ingest.js");
-    const { detectStack, printStack } = await import("./engine/tech-stack.js");
-    const repo = await ingest(p);
-    console.log(`Scanned ${repo.files.length} source files.`);
-    printStack(detectStack(repo));
-
-    if (opts.deep) {
-      const { buildModel } = await import("./engine/ast.js");
-      const { understandArchitecture } = await import("./engine/understand.js");
-      console.log("\n🏗️  Architecture (Claude):\n");
-      const summary = understandArchitecture(repo, buildModel(repo));
-      if (summary) console.log(summary.trim() + "\n");
-    }
-  });
-
-// shepherd modernity [path] [--deep]   (outdated deps + old code patterns)
-program
-  .command("modernity [path]")
-  .description("Check for outdated dependencies (+ --deep for deprecated code patterns)")
-  .option("--deep", "add a Claude review for old/deprecated code patterns")
-  .action(async (p = ".", opts: { deep?: boolean }) => {
-    const { ingest } = await import("./engine/ingest.js");
-    const { outdatedDependencies, reviewModernity } = await import("./engine/modernity.js");
-    const { printReport } = await import("./engine/report.js");
-    const repo = await ingest(p);
-    console.log("Checking dependency freshness against the npm registry …");
-    const findings = await outdatedDependencies(repo);
-    if (opts.deep) findings.push(...reviewModernity(repo));
-    printReport(findings);
-  });
-
-// shepherd stats   (the data flywheel — what Shepherd has learned)
-program
-  .command("stats")
-  .description("Show what Shepherd has learned across all scans (the data moat)")
-  .action(async () => {
-    const { readLedger, computeStats } = await import("./engine/ledger.js");
-    const s = computeStats(readLedger());
-    if (!s.scans) {
-      console.log("No scans recorded yet. Run `shepherd scan` to start building the flywheel.");
-      return;
-    }
-    console.log(`\n📈 Shepherd has run ${s.scans} scans across ${s.repos} repos — ${s.totalFindings} findings logged.`);
-    console.log("\nMost common findings (the checklist, ranked by real-world frequency):");
-    for (const c of s.checkFrequency.slice(0, 15)) {
-      console.log(`  ${String(c.total).padStart(6)}  ${c.id.padEnd(22)} seen in ${c.scans} scan(s)`);
-    }
-    console.log("\nThis ranking is the moat: a code-cloner starts at zero.\n");
-  });
-
-// shepherd probe [path]   (power-user: just the live attack; the autonomous
-// run already does this — this is a shortcut for re-running only the probe)
-program
-  .command("probe [path]")
-  .description("Boot the app and run the live attack probe (localhost only)")
-  .action(async (p = ".") => {
-    await printBanner();
-    const { liveProbe } = await import("./engine/backend/probe.js");
-    const { ingest } = await import("./engine/ingest.js");
-    const { printReport } = await import("./engine/report.js");
-    const repo = await ingest(p);
-    const findings = await liveProbe(repo);
-    printReport(findings);
-    process.exitCode = findings.some((f) => f.disposition === "gate") ? 1 : 0;
-  });
-
-// shepherd init   (install .shepherd/ + register the MCP server with Claude Code)
-program
-  .command("init [path]")
-  .description("Install .shepherd/ tracking + register Shepherd's MCP server with Claude Code")
-  .action((p = ".") => registerMcp(p));
-
-program
-  .command("hello")
-  .description("Meet Shepherd 🐑")
-  .action(() => printBanner(true));
-
-program.parseAsync().catch((err: unknown) => {
+main().catch((err: unknown) => {
   // never dump a raw stack at the user — a clean message + non-zero exit.
   const msg = err instanceof Error ? err.message : String(err);
   console.error(`\nshepherd: ${msg}`);

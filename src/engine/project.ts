@@ -74,7 +74,9 @@ export function initProject(root: string): Project {
   // commit the shared profile + config; keep local run noise out of git.
   const ignore = path.join(dir, ".gitignore");
   if (!existsSync(ignore)) {
-    writeFileSync(ignore, ["history.jsonl", "reports/", ""].join("\n"));
+    // shared (committed): config.json, SHEPHERD.md, triage.json, test.md, candidate-rules/
+    // local (ignored): run noise + the private conversation/evolution logs
+    writeFileSync(ignore, ["history.jsonl", "reports/", "user.md", "findings.jsonl", ""].join("\n"));
   }
 
   return { root, dir, config };

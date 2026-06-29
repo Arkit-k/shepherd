@@ -4,46 +4,65 @@
 
 # Shepherd
 
-**Production-readiness gate for AI-written code.**
+**Production-readiness agent for AI-written code.**
 *You code, we maintain.*
 
 </div>
 
 ---
 
-AI tools (Lovable, Bolt, v0, Cursor, Claude) ship working apps fast — and quietly leave behind cost-bombs, missing auth, client-only access control, outdated patterns, and architectural drift. Shepherd is the gate that catches what AI code specifically gets wrong. It runs continuously — on every push — not as a one-time audit.
+AI tools (Lovable, Bolt, v0, Cursor, Claude) ship working apps fast — and quietly leave behind cost-bombs, missing auth, client-only access control, outdated patterns, and architectural drift. Shepherd is the agent that catches what AI code specifically gets wrong, then **guides you through fixing it** — and writes the tests so it stays fixed.
 
 ```bash
 npx shepherd
 ```
 
-That's the whole interface. No flags, no subcommands to learn. Shepherd surveys your codebase, audits it, and stress-tests it — then **hands a precise fix work-order to your own Claude Code session** to apply. Shepherd is the maintainer; it never edits your code itself, so every change stays under your review.
+That starts Shepherd and drops you into a conversation. **It's an agent, not a set of commands** — there's nothing to memorize. Shepherd boots as a 200-year-old principal engineer (its `soul.md`), takes stock of your repo on its own, and then you just talk to it:
+
+- *“review the architecture”*
+- *“review the `handleCheckout` function in `billing.ts`”*
+- *“is it production ready?”*  →  the full deterministic + deep audit + a go-live verdict
+- *“how do I scale this to a million users?”*  →  it surveys the system, researches current infra on the live web, and writes a scale plan — *“add a task queue (BullMQ) here, Valkey for sessions there, Meilisearch instead of this `ILIKE`”* — each with the exact file it plugs into
+- *“write tests for the auth flow”*  →  it designs the essential tests + a work-order to add them
+- *“that's a false positive — the limiter's in middleware”*  →  it remembers, and never raises it again
+
+Shepherd is the **maintainer; it never edits your code itself.** It finds what's wrong, explains why it matters at a million users, and hands a precise work-order to *your* Claude Code session — so every change stays under your review.
+
+Prefer shortcuts? Type **`/`** for Claude-style slash commands — natural language still works, but these are the fast, discoverable path:
+
+| Command | What it does |
+|---|---|
+| `/go-live-checks` *(`/audit`)* | Full audit — deterministic + deep review + scale + cost → go-live verdict |
+| `/architecture-review` *(`/arch`)* | Design review at scale: layering, coupling, boundaries, data flow |
+| `/security-review` *(`/sec`)* | Focused security pass (authz, injection, secrets, exposure) |
+| `/review <file\|function>` | Focused code/function review |
+| `/scale` *(`/infra`)* | Infra roadmap to ~1M users + a written scale plan |
+| `/infra-cost` *(`/cost`)* | $ abuse exposure (cost-bombs) + infra bill at 1M, web-grounded |
+| `/tests <target>` | Design the essential tests + a work-order |
+| `/fix` | Write the fix work-order for your Claude Code session |
+| `/profile` | Show what Shepherd remembers about this project |
+| `/help` · `/exit` | List commands · leave |
 
 ## Why Shepherd
 
 - **It knows how *AI* code fails.** The detectors target the specific failure modes of generated code — public AI/email endpoints with no rate limit, secrets in the client bundle, access control enforced only on the frontend, deprecated libraries the model still reaches for.
-- **Shepherd maintains; your Claude Code edits.** Detection is deterministic (the moat). Shepherd never silently edits your code — it writes a precise fix work-order and hands it to *your* running Claude Code session, so every change happens under your eye.
-- **One engine, two shells.** The same engine runs as a **CLI** (on *your* Claude Code — free) and as a **GitHub App** (server-side, on our API — paid). Same checks everywhere.
-- **It learns.** Every scan feeds an anonymized ledger that ranks findings by real-world frequency. A code-cloner starts at zero data.
+- **It's grounded, not hand-wavy.** When you ask for a review, the agent runs Shepherd's *own* deterministic detectors (via its built-in MCP server) and quotes the real findings — reviews are backed by the engine, not vibes.
+- **It thinks about *scale*, not just bugs.** Ask how to reach a million users and Shepherd becomes a principal infrastructure architect: it reads the system, finds the workload pressures (inline email, `ILIKE` search, in-memory sessions, a single DB pool), and prescribes the infrastructure to fix them — a cache, a task queue, an event stream, search, read replicas — naming current, actively-maintained open-source tools it confirms on the **live web**. A broken weekend project gets a credible road to production load.
+- **It remembers.** Across runs Shepherd keeps the project's recurring soft spots, your triage decisions ("ruled a false-positive because X"), and the tests that matter here — and recalls them before it judges, so it doesn't re-litigate what you've settled.
+- **It learns.** Recurring findings the regex can't yet catch get distilled into *candidate* rules for your review — and every scan feeds an anonymized ledger that ranks findings by real-world frequency. A code-cloner starts at zero data.
+- **One engine, two shells.** The same engine runs in the **CLI agent** (on *your* Claude Code — free) and, soon, as a **GitHub App** (server-side, on our API — paid). Same checks everywhere.
 
-## The walk-through
+## What it does on an audit
 
-One run dispatches a sequence of agents — the way a senior engineer reviews a handoff:
+Ask *“audit”* (or run it in CI — see below) and Shepherd runs the full walk-through, the way a senior engineer reviews a handoff:
 
-1. **Surveyor** — walks the codebase and states what it is and what it's built with.
-2. **Modernizer** — outdated dependencies, deprecated patterns, **and old-but-works idioms where a newer/safer primitive exists** (e.g. a form posting via client `fetch` → Next.js **Server Actions**; class components → hooks; `getServerSideProps` → App Router server components; `moment` → date-fns). Also reads how the repo is **organized** and recommends feature-folders (vertical slices) over layer-folders, the way top teams build.
-3. **Auditor** — security, performance, architecture, and logic findings, split into **gates** (block the merge) and **advice**. Also reviews **design patterns** (Singleton, Factory, Builder, Proxy, Facade, Observer, Decorator…) and names the **trade-offs** — judged *as per this project's* scale and architecture, not textbook generics (a Singleton is fine in a CLI, a problem in a 1M-scale API). And it reviews your **DevOps / infra-as-code** — GitHub Actions (unpinned actions, `pull_request_target` secret-exfil, `${{ github.event }}` command injection, token permissions), nginx (weak TLS, no rate limit, version disclosure, missing headers), Jenkins/Groovy (shell injection, hardcoded creds), Terraform/CloudFormation/Bicep (`0.0.0.0/0` security groups, public buckets, IAM `*`, hardcoded cloud keys), and docker-compose — grounded in current GitHub/Wiz/Checkov/nginx hardening guidance.
-4. **Backend & Production-Readiness** — the part that earns the "production" promise:
-   - **Pattern** — detects the *actual* architecture: event-driven, task-queue/async-jobs, CQRS, event-sourcing, hexagonal/clean, spec-driven, layered/MVC.
-   - **Production engineer** — takes inventory of what infra is *present* (broker / queue / cache / pool / Docker) and reasons like a principal engineer: *given this pattern at 1M, what's required and missing?* Event-driven on an in-process `EventEmitter` with no Kafka/RabbitMQ → gate. Background work in the request path with no BullMQ/Celery worker → gate. No cache, no connection pool → gate.
-   - **Researches the live internet** — one low-context, web-grounded pass (like a principal engineer who *looks it up*): the current stable versions, today's best-practice tooling for your pattern at scale, and known CVEs/advisories — each recommendation carrying a **source URL**. (e.g. *"current field default is BullMQ v5.71 on Redis — source: bullmq.io"*.)
-   - **Scale & resilience** — scales-to-1M and error-tolerance checks (N+1, unbounded queries, no timeouts/retries/validation, in-memory state).
-   - **Frontend at 1M DAU** — raw `<img>`, heavy client bundles, fetch waterfalls, unvirtualized lists.
-   - **Live attack** — boots your app and runs a bounded, localhost-only probe that *proves* the cost-bomb (no `429` under a burst), auth bypass, missing headers, stack-trace leakage.
-   - **Operations & observability** — is it *operable*? Error tracking (Sentry/Rollbar), structured logging + request IDs, health/readiness endpoints, graceful shutdown, **`.env` committed to git** (a gate), `.env.example` completeness, CI pipeline, Dockerfile hygiene (non-root, multi-stage, pinned base), and **`npm audit`** CVEs (critical = gate). Grounded in real SRE/production-readiness checklists.
-   - **Load test** — if Docker is present, stands up the real dependencies, runs a bounded ramp, finds the single-box ceiling, and **projects honestly** toward the target with the bottleneck named. (We measure and project — we don't pretend a laptop proves 1M req/s.)
-5. **Go-Live Gate** — the principal-engineer call. Shepherd collapses every finding into distinct **blockers** (no duplicate noise), orders them into a **critical path**, and gives one verdict: **Ship / Not-ready-yet**, with a rough effort-to-green.
-6. **Hand-off** — Shepherd writes the blockers into a precise fix work-order (`.shepherd/fix-order.md`) and hands it to **your own Claude Code session** to apply. It never edits your code itself.
+1. **Survey** — what is this app, how is it built, how is it organized (layer-folders vs feature-slices).
+2. **Modernity** — outdated deps, deprecated patterns, and old-but-works idioms where a newer/safer primitive exists (form `fetch` → Server Actions, class components → hooks, `moment` → date-fns).
+3. **Audit** — security, performance, architecture, and logic, split into **gates** (block the merge) and **advice**, plus design-pattern trade-offs judged *as per this project's* scale, and a DevOps / infra-as-code review (GitHub Actions, nginx, Jenkins, Terraform/CFN/Bicep, compose).
+4. **Backend & production-readiness** — detects the real pattern (event-driven, task-queue, CQRS, hexagonal…), reasons like a principal engineer about required-but-missing infra at 1M, researches current best practice on the live web (with source URLs), runs a bounded **live attack probe** on localhost (proves the cost-bomb, auth bypass, header/stack-trace leaks), checks **operations & observability**, and — if Docker's present — a bounded **load test** that projects honestly toward the target.
+5. **Scale architect** — a whole-system, web-grounded pass that prescribes the *infrastructure* to carry the app to ~1M users (cache, task queue, event stream, search, read replicas, connection pool, rate limiter…), names current open-source tools with source URLs, and writes a `.shepherd/scale-plan.md` you can work through one change at a time.
+6. **Go-Live Gate** — collapses everything into distinct, ordered blockers and gives one verdict: **Ship / Not-ready**, with a rough effort-to-green.
+7. **Hand-off** — writes the blockers into `.shepherd/fix-order.md` for your Claude Code session to apply. Shepherd never edits your code.
 
 ```
   ════════════════════════════════════════
@@ -58,55 +77,34 @@ One run dispatches a sequence of agents — the way a senior engineer reviews a 
   ════════════════════════════════════════
 ```
 
+## Soul & memory
+
+Shepherd is the same engineer every time, and it gets sharper the more you work with it.
+
+- **`soul.md`** (repo root) — Shepherd's identity: the 200-year-old principal engineer who audits, architects, and believes everything essential deserves a test. Injected into every reasoning turn. Edit it to change *how* Shepherd thinks — it doubles as training material.
+- **`.shepherd/SHEPHERD.md`** — a living profile of your architecture and recurring soft spots, regenerated every run.
+- **`.shepherd/triage.json`** — your decisions (accept / won't-fix / false-positive) with reasons; suppressed on future runs and recalled in reviews.
+- **`.shepherd/test.md`** — the tests Shepherd has designed, plus what it has learned matters most here.
+- **`.shepherd/user.md`** — the conversation log; Shepherd distills it to learn which tests this team cares about.
+- **`.shepherd/candidate-rules/`** — rules Shepherd distilled from recurring findings, waiting for your review (move one into `~/.shepherd/packs/` to activate). Learning proposes; you commit.
+
+`config.json`, `SHEPHERD.md`, `triage.json` and `test.md` are meant to be committed (team-shared); history, reports, and the conversation log are gitignored by default.
+
+## In CI (no one to talk to)
+
+When there's no terminal — a CI job, a pipe — Shepherd can't have a conversation, so it does the whole job autonomously once and exits non-zero if the repo isn't production-ready:
+
+```bash
+npx shepherd .          # non-interactive → full audit + hand-off, fails the build on gates
+```
+
 ## How the hand-off works
 
-Shepherd is the maintainer. It finds the problems and writes the prompt; your Claude Code session does the editing, so you stay in control. Three ways, from manual to zero-touch:
-
-- **Manual** — in your open session, say: *“apply the fixes in `.shepherd/fix-order.md`.”*
-- **MCP pull** (`shepherd init`): ask Claude to *“get the shepherd fix order and apply it”* — the `fix_order` tool returns the work-order, your session applies it, then calls `scan` to verify.
-- **Zero-touch push (Channels)** — start your session with:
-  ```bash
-  claude --dangerously-load-development-channels server:shepherd
-  ```
-  Now any `npx shepherd` run writes the work-order and Shepherd **pushes it straight into that session** — Claude wakes up, reads `.shepherd/fix-order.md`, and applies it. No typing.
-
-> Channels are a Claude Code research-preview feature (v2.1.80+); the `--dangerously-load-development-channels` flag is required while it's in preview. There's no supported way to type into a running terminal session directly — Channels is the official push mechanism.
-
-## It tracks your project (like `.claude/`)
-
-On first run Shepherd installs a **`.shepherd/`** folder into your repo and tracks the project across runs:
-
-- `config.json` — the start command, port, and attack caps it learned (edit to override)
-- `SHEPHERD.md` — a living profile of your architecture and recurring soft spots
-- `reports/` — a detailed, keep-able report per run (`latest.md` always current)
-- `history.jsonl` — the trend over time (gates last week → 0 now)
-- `baseline.json` — findings you've accepted, so re-runs surface only what's *new*
-
-`config.json` and `SHEPHERD.md` are meant to be committed (team-shared); history and reports are gitignored by default.
+Shepherd finds the problems and writes the prompt; your Claude Code session does the editing, so you stay in control. Just ask Shepherd to *“write the fix work-order”* (or *“write the tests”*, or *“how do I scale to 1M?”*), then in your session say *“apply the fixes in `.shepherd/fix-order.md`”* — or work through `.shepherd/scale-plan.md` one infrastructure change at a time. If Shepherd's MCP server is wired into your session, it can also push the order to you automatically (Channels, research preview).
 
 ## Safety of the live probe
 
 The attack stage hits **localhost only**, against a server Shepherd itself starts, with hard request caps and per-request timeouts — bounded testing of your own app, never an external target, never unbounded. The server is always shut down afterward; if it can't boot, the probe is skipped and the run continues.
-
-## Advanced: run a single phase
-
-Most people never need these — `shepherd` does it all. But each agent is also a subcommand:
-
-| Command | What it does |
-|---|---|
-| `shepherd` | **Autonomous run — survey, audit, backend probe, then hand off (this is all you need)** |
-| `shepherd scan [path]` | Audit only (`--deep` for the Claude review) |
-| `shepherd handoff [path]` | Write the fix work-order for your Claude Code session |
-| `shepherd probe [path]` | Just the live attack: boot the app + attack localhost |
-| `shepherd understand [--deep]` | Tech stack + Claude architecture summary |
-| `shepherd modernity [--deep]` | Outdated deps + deprecated code patterns |
-| `shepherd stats` | What Shepherd has learned across all scans |
-| `shepherd init [path]` | Install `.shepherd/` + register the MCP server |
-
-## Two ways to run it
-
-- **Shepherd drives (CLI):** `npx shepherd` audits + stress-tests and writes the fix work-order; you hand it to your Claude Code session.
-- **Claude Code drives (MCP):** `shepherd init`, then ask Claude to *"get the shepherd fix order and apply it"* — your session pulls the order, applies it, and re-verifies with `scan`.
 
 ## Install
 
@@ -114,11 +112,11 @@ Most people never need these — `shepherd` does it all. But each agent is also 
 npm i -g shepherd      # or just use npx
 ```
 
-Requires Node 18+. The `--deep` reviews use [Claude Code](https://claude.com/claude-code) on your own account when present, and your own Claude Code session applies the fix work-order; without Claude, the deterministic scan still runs free.
+Requires Node 18+. The conversation and deep reviews use [Claude Code](https://claude.com/claude-code) on your own account when present; without it, the deterministic audit still runs free.
 
 ## Status
 
-The engine is built and verified end-to-end on real AI-built repos — Tier 1 (deterministic) catches cost-bombs and hardcoded hosts; Tier 2 (Claude `--deep`) has caught prompt-injection, billing bypasses, and unbounded inputs in the wild. See [`ROADMAP.md`](ROADMAP.md) for what's next (the GitHub App).
+The engine is built and verified end-to-end on real AI-built repos, and the agent interface + memory loop (soul, grounded reviews, conversational triage, test generation, living profile, rule self-evolution) are in. See [`ROADMAP.md`](ROADMAP.md) for what's next (the GitHub App).
 
 ## License
 

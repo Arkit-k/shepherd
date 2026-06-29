@@ -10,9 +10,16 @@ import { designPatterns } from "./engine/design-patterns.js";
 import { operationsChecks } from "./engine/operations.js";
 import { scan } from "./engine/run.js";
 import { claudeAvailable } from "./engine/fixers/claude.js";
-import { buildFixOrder, writeFixOrder, claudeSessionRunning } from "./engine/handoff.js";
+import { buildFixOrder, writeFixOrder, claudeSessionRunning, buildScalePlan, writeScalePlan } from "./engine/handoff.js";
+import { scaleArchitect } from "./engine/backend/architect.js";
+import { estimateCost, buildCostReport } from "./engine/finops.js";
+import { writeCostReport } from "./engine/handoff.js";
 import { printReport, dedupeFindings, type Finding } from "./engine/report.js";
 import { recordScan } from "./engine/ledger.js";
+import { suppressDismissed } from "./engine/memory/triage.js";
+import { updateProfile } from "./engine/memory/profile.js";
+import { recordForEvolution } from "./engine/memory/evolution.js";
+import { recordRun } from "./engine/project.js";
 import { analyzeArchitecture } from "./engine/backend/architecture.js";
 import { analyzeProduction } from "./engine/backend/production.js";
 import { researchProduction } from "./engine/research.js";
@@ -118,6 +125,50 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
     });
   }
 
+  // the scale architect: a whole-project, web-grounded infra prescription — what
+  // to add (cache/queue/event-stream/search/replicas/…) to carry this to ~1M, with
+  // current tools. Advisory; also written as a stand-alone scale plan to hand off.
+  let architectFindings: Finding[] = [];
+  let costFindings: Finding[] = [];
+  if (hasClaude) {
+    console.log(pc.dim("  Scale architect: prescribing the infra to reach ~1M users (web-grounded) …"));
+    const arch = scaleArchitect(repo, { web: true });
+    architectFindings = arch.findings;
+    if (arch.prescriptions.length) {
+      try {
+        const planPath = writeScalePlan(root, buildScalePlan(arch.prescriptions, ts));
+        const now = arch.prescriptions.filter((p) => p.priority === "now").length;
+        console.log(
+          pc.dim(
+            `  → ${arch.prescriptions.length} infra recommendation(s)${now ? `, ${now} urgent` : ""} · ` +
+              `scale plan: ${planPath.replace(/\\/g, "/")}`,
+          ),
+        );
+      } catch {
+        /* plan is best-effort */
+      }
+    }
+
+    // FinOps — the dollar story: abuse exposure (cost-bombs in $) + infra run-cost.
+    console.log(pc.dim("  FinOps: pricing the abuse exposure + the infra bill (web-grounded) …"));
+    const cost = estimateCost(repo, { prescriptions: arch.prescriptions, web: true });
+    costFindings = cost.findings;
+    if (cost.items.length) {
+      try {
+        const reportPath = writeCostReport(root, buildCostReport(cost.items, ts));
+        const unprotected = cost.items.filter((c) => c.kind === "exposure" && c.protected === false).length;
+        console.log(
+          pc.dim(
+            `  → priced ${cost.items.length} line(s)${unprotected ? `, ${unprotected} unprotected paid endpoint(s) — $ at risk` : ""} · ` +
+              `cost report: ${reportPath.replace(/\\/g, "/")}`,
+          ),
+        );
+      } catch {
+        /* report is best-effort */
+      }
+    }
+  }
+
   // design patterns + trade-offs, judged AS PER THIS PROJECT (stack/pattern/scale).
   const designFindings = designPatterns(repo, {
     deep: hasClaude,
@@ -155,25 +206,43 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
   // operations/structure/idioms/design/scale-T1/fe-T1), so the per-module calls
   // below overlap on their Tier-1 rows — dedupe collapses those, keeping the
   // Claude/empirical/network findings unique.
-  const findings: Finding[] = dedupeFindings([
-    ...audit.findings,
-    ...modernity,
-    ...structureFindings,
-    ...architecture.findings,
-    ...production.findings,
-    ...researchFindings,
-    ...designFindings,
-    ...opsFindings,
-    ...scaleFindings,
-    ...feFindings,
-    ...live,
-    ...loadFindings,
-  ]);
+  const findings: Finding[] = suppressDismissed(
+    dedupeFindings([
+      ...audit.findings,
+      ...modernity,
+      ...structureFindings,
+      ...architecture.findings,
+      ...production.findings,
+      ...researchFindings,
+      ...architectFindings,
+      ...costFindings,
+      ...designFindings,
+      ...opsFindings,
+      ...scaleFindings,
+      ...feFindings,
+      ...live,
+      ...loadFindings,
+    ]),
+    repo.root,
+  );
   printReport(findings);
   try {
     if (!process.env.SHEPHERD_NO_LEDGER) recordScan(repo, findings);
   } catch {
     /* ledger is best-effort */
+  }
+  // refresh the living project profile (recurring soft spots) + run-history trend.
+  try {
+    updateProfile(root, {
+      findings,
+      ts,
+      stack: `${tech.language}, ${tech.frameworks.join(", ") || "—"}`,
+      shape: architecture.shape,
+    });
+    recordRun(loadProject(root), ts, findings, repo.files.length);
+    recordForEvolution(root, repo, findings);
+  } catch {
+    /* best-effort */
   }
 
   // ⑤ Go-Live Gate — the principal-engineer call: ship or not, and the path.

@@ -12,6 +12,7 @@ import { scaleAndResilience } from "./backend/scale.js";
 import { frontendScale } from "./frontend/scale.js";
 import { devopsChecks } from "./devops.js";
 import { recordScan } from "./ledger.js";
+import { suppressDismissed } from "./memory/triage.js";
 import { printReport, dedupeFindings, type Finding } from "./report.js";
 
 export interface ScanOptions {
@@ -50,7 +51,10 @@ export async function scan(root: string, opts: ScanOptions = {}): Promise<ScanRe
     findings.push(...deepReview(repo));
   }
 
-  return { repo, model, findings };
+  // Honor the team's prior triage decisions (won't-fix / false-positive /
+  // accepted) so re-runs surface only what's genuinely new. This is the FEEDBACK
+  // memory closing the loop: a finding dismissed once stays dismissed.
+  return { repo, model, findings: suppressDismissed(findings, repo.root) };
 }
 
 export async function run(root: string, opts: ScanOptions = {}): Promise<Finding[]> {
