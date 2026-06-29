@@ -5,6 +5,7 @@ import { codeQuality } from "./detectors/code-quality.js";
 import { security } from "./detectors/security.js";
 import { loadRules, applyRules } from "./rules/registry.js";
 import { operationsChecks } from "./operations.js";
+import { projectHygiene } from "./hygiene.js";
 import { analyzeStructure } from "./structure.js";
 import { betterPatterns } from "./idioms.js";
 import { designPatterns } from "./design-patterns.js";
@@ -38,6 +39,7 @@ export async function scan(root: string, opts: ScanOptions = {}): Promise<ScanRe
     ...codeQuality(repo, model), // measurable SOLID (size, complexity, god-class)
     ...applyRules(repo, loadRules()), // community / AI-tool rule packs
     ...operationsChecks(repo, { audit: false }), // observability, .env hygiene, CI, Dockerfile
+    ...projectHygiene(repo), // team-hygiene scaffolding: Husky, linter, formatter, license, …
     ...analyzeStructure(repo).findings, // layer-vs-feature organization
     ...betterPatterns(repo, { deep: false }), // modern-idiom upgrades
     ...designPatterns(repo, { deep: false }), // design patterns + trade-offs

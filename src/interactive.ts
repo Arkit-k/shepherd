@@ -11,7 +11,8 @@ import type { Repo } from "./engine/ingest.js";
 import { askShepherd } from "./engine/chat.js";
 import { claudeAvailable } from "./engine/fixers/claude.js";
 import { goLiveVerdict, printVerdict } from "./engine/gate.js";
-import { buildFixOrder, writeFixOrder, buildScalePlan, writeScalePlan, writeCostReport } from "./engine/handoff.js";
+import { buildFixOrder, writeFixOrder, buildScalePlan, writeScalePlan, writeCostReport, writeScaffoldOrder } from "./engine/handoff.js";
+import { hygieneItems, buildScaffoldOrder } from "./engine/hygiene.js";
 import { scaleArchitect } from "./engine/backend/architect.js";
 import { estimateCost, buildCostReport } from "./engine/finops.js";
 import { gitCheck, printGitCheck, installPrePushHook } from "./engine/gitcheck.js";
@@ -71,11 +72,14 @@ function preamble(root: string): string {
   ].join("\n");
 }
 
-type Intent = "exit" | "audit" | "scale" | "cost" | "gitcheck" | "fix" | "tests" | "learn" | "evolve" | "triage" | "help" | "chat";
+type Intent = "exit" | "audit" | "scale" | "cost" | "gitcheck" | "scaffold" | "fix" | "tests" | "learn" | "evolve" | "triage" | "help" | "chat";
 
 function intentOf(s: string): Intent {
   const t = s.trim().toLowerCase();
   if (/^(exit|quit|bye|:q|q)$/.test(t)) return "exit";
+  // Project-hygiene scaffolding — missing tooling/config files (Husky, linter, …).
+  if (/\b(scaffold|hygiene|tooling|husky|lint(er|ing)?|prettier|formatter|editorconfig|dependabot|renovate|codeowners|missing (files?|config|tooling)|production[- ]?(level |grade )?files?|setup files?)\b/.test(t))
+    return "scaffold";
   // Pre-push gate — review only what's about to be pushed. Checked early so
   // "check before I push" isn't read as a full audit.
   if (/\b(git[- ]?check|check before (i )?push|safe to push|ready to push|pre[- ]?push|review my (changes|diff|commit)|check my (changes|diff)|gate my push)\b/.test(t))
@@ -132,6 +136,7 @@ const SLASH_HELP = [
   "  /scale            (/scale-plan, /infra)  — infra roadmap to ~1M users + a written scale plan",
   "  /infra-cost       (/cost, /finops)       — $ abuse exposure (cost-bombs) + infra bill at 1M, web-grounded",
   "  /git-check        (/git-check install)   — review what you're about to push (verdict); 'install' wires a pre-push hook",
+  "  /scaffold         (/hygiene, /tooling)   — find missing prod-grade files (Husky, linter, formatter, license…) + a work-order",
   "  /tests <target>   (/test)                — design the essential tests + a work-order",
   "  /fix              (/work-order)          — write the fix work-order for your Claude Code session",
   "  /triage <what>                           — record a won't-fix / false-positive (I stop raising it)",
@@ -183,6 +188,8 @@ function translateSlash(raw: string): Slash {
     case "git-check": case "gitcheck": case "checkpush": case "prepush":
       // arg "install" wires the pre-push hook; otherwise run the check now.
       return { intent: "gitcheck", line: arg.toLowerCase() === "install" ? "install" : raw };
+    case "scaffold": case "hygiene": case "tooling":
+      return { intent: "scaffold", line: raw };
     case "fix": case "work-order": case "workorder": case "handoff":
       return { intent: "fix", line: raw };
     case "evolve": case "promote": return { intent: "evolve", line: raw };
@@ -545,6 +552,31 @@ export async function interactive(root = "."): Promise<number> {
           appendTurn(root, "shepherd", msg);
           if (!v.ready) console.log(pc.dim("  " + msg) + "\n");
         }
+        continue;
+      }
+
+      if (intent === "scaffold") {
+        const repo = await ingest(root);
+        const items = hygieneItems(repo);
+        if (items.length === 0) {
+          const msg = "Your scaffolding is solid — Husky, linter, formatter, license, README and friends are all present. Nothing to add.";
+          console.log("\n  " + msg + "\n");
+          appendTurn(root, "shepherd", msg);
+          continue;
+        }
+        console.log(pc.bold(`\n  🧱 Missing production-grade scaffolding (${items.length}):\n`));
+        for (const it of items) {
+          const dot = it.severity === "warn" ? "🟡" : "🔵";
+          console.log(`   ${dot} ${pc.bold(it.file)} ${pc.dim(`(${it.id})`)}`);
+          console.log(`      ${it.message}`);
+        }
+        const orderPath = writeScaffoldOrder(root, buildScaffoldOrder(items, new Date().toISOString()));
+        const msg =
+          `\n  Wrote a scaffold work-order to ${orderPath.replace(/\\/g, "/")} (${items.length} file(s)). ` +
+          `I describe them; I don't write your files — apply it in your Claude Code session: ` +
+          `“create the files in ${orderPath.replace(/\\/g, "/")}”. None of these block a merge; they're the team guardrails.`;
+        console.log(pc.dim(msg) + "\n");
+        appendTurn(root, "shepherd", msg);
         continue;
       }
 

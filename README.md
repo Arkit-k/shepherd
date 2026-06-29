@@ -39,6 +39,7 @@ Prefer shortcuts? Type **`/`** for Claude-style slash commands — natural langu
 | `/scale` *(`/infra`)* | Infra roadmap to ~1M users + a written scale plan |
 | `/infra-cost` *(`/cost`)* | $ abuse exposure (cost-bombs) + infra bill at 1M, web-grounded |
 | `/git-check` *(`/git-check install`)* | Review only what you're about to push → go/no-go; `install` wires a pre-push hook |
+| `/scaffold` *(`/hygiene`)* | Find missing production-grade files (Husky, linter, formatter, license, …) + a work-order |
 | `/tests <target>` | Design the essential tests + a work-order |
 | `/fix` | Write the fix work-order for your Claude Code session |
 | `/profile` | Show what Shepherd remembers about this project |

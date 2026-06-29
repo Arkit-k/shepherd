@@ -147,6 +147,14 @@ export function writeCostReport(root: string, report: string): string {
   return path.relative(root, abs);
 }
 
+// The scaffold work-order — production-grade tooling/config files to add.
+export function writeScaffoldOrder(root: string, order: string): string {
+  const project = loadProject(root);
+  const abs = path.join(project.dir, "scaffold-order.md");
+  writeFileSync(abs, order);
+  return path.relative(root, abs);
+}
+
 export function readFixOrder(root: string): string | null {
   const abs = path.join(root, ".shepherd", ORDER_FILE);
   if (!existsSync(abs)) return null;
