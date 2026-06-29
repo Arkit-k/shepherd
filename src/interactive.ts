@@ -14,6 +14,7 @@ import { goLiveVerdict, printVerdict } from "./engine/gate.js";
 import { buildFixOrder, writeFixOrder, buildScalePlan, writeScalePlan, writeCostReport } from "./engine/handoff.js";
 import { scaleArchitect } from "./engine/backend/architect.js";
 import { estimateCost, buildCostReport } from "./engine/finops.js";
+import { gitCheck, printGitCheck, installPrePushHook } from "./engine/gitcheck.js";
 import { ingest } from "./engine/ingest.js";
 import { designTests } from "./engine/testgen.js";
 import { printReport, type Finding } from "./engine/report.js";
@@ -70,11 +71,15 @@ function preamble(root: string): string {
   ].join("\n");
 }
 
-type Intent = "exit" | "audit" | "scale" | "cost" | "fix" | "tests" | "learn" | "evolve" | "triage" | "help" | "chat";
+type Intent = "exit" | "audit" | "scale" | "cost" | "gitcheck" | "fix" | "tests" | "learn" | "evolve" | "triage" | "help" | "chat";
 
 function intentOf(s: string): Intent {
   const t = s.trim().toLowerCase();
   if (/^(exit|quit|bye|:q|q)$/.test(t)) return "exit";
+  // Pre-push gate — review only what's about to be pushed. Checked early so
+  // "check before I push" isn't read as a full audit.
+  if (/\b(git[- ]?check|check before (i )?push|safe to push|ready to push|pre[- ]?push|review my (changes|diff|commit)|check my (changes|diff)|gate my push)\b/.test(t))
+    return "gitcheck";
   // FinOps — the dollar story. Checked before scale/audit so "how much will this
   // cost" doesn't get read as a scaling or audit request.
   if (/\b(cost|costs?|finops|how much|\$|dollars?|expensive|cost ?bomb|bill|budget|cloud (bill|cost)|spend|burn rate|pricing|how much .* (cost|spend|pay))\b/.test(t))
@@ -103,6 +108,7 @@ const HELP = [
   "  • “is it production ready?” / “audit”  — the full deterministic + deep audit + verdict",
   "  • “how do I scale to 1M users?”         — I survey the system + research current infra (Redis/queue/Kafka/…) and write a scale plan",
   "  • “how much will this cost?”            — I price the abuse exposure (cost-bombs in $) + the infra bill at 1M, web-grounded",
+  "  • “check before I push” / /git-check    — I review only what you're about to push and give a go/no-go (install a pre-push hook with “/git-check install”)",
   "  • “write the fix work-order”           — I hand your Claude Code session a precise fix order",
   "  • “write tests for handler.js”         — I design the essential tests + a work-order to add them",
   "  • “that's a false positive because…”   — I remember your decision and stop raising it",
@@ -125,6 +131,7 @@ const SLASH_HELP = [
   "  /review <file|function>                  — focused code/function review",
   "  /scale            (/scale-plan, /infra)  — infra roadmap to ~1M users + a written scale plan",
   "  /infra-cost       (/cost, /finops)       — $ abuse exposure (cost-bombs) + infra bill at 1M, web-grounded",
+  "  /git-check        (/git-check install)   — review what you're about to push (verdict); 'install' wires a pre-push hook",
   "  /tests <target>   (/test)                — design the essential tests + a work-order",
   "  /fix              (/work-order)          — write the fix work-order for your Claude Code session",
   "  /triage <what>                           — record a won't-fix / false-positive (I stop raising it)",
@@ -173,6 +180,9 @@ function translateSlash(raw: string): Slash {
       return { intent: "scale", line: raw };
     case "infra-cost": case "infracost": case "cost": case "finops":
       return { intent: "cost", line: raw };
+    case "git-check": case "gitcheck": case "checkpush": case "prepush":
+      // arg "install" wires the pre-push hook; otherwise run the check now.
+      return { intent: "gitcheck", line: arg.toLowerCase() === "install" ? "install" : raw };
     case "fix": case "work-order": case "workorder": case "handoff":
       return { intent: "fix", line: raw };
     case "evolve": case "promote": return { intent: "evolve", line: raw };
@@ -508,6 +518,33 @@ export async function interactive(root = "."): Promise<number> {
           `${infra.length} infra line(s) priced). Estimates to size decisions, not quotes.`;
         console.log(pc.dim("  " + msg) + "\n");
         appendTurn(root, "shepherd", msg);
+        continue;
+      }
+
+      if (intent === "gitcheck") {
+        if (line === "install") {
+          const res = installPrePushHook(root);
+          const msg = res.ok
+            ? `Installed a pre-push gate at ${res.path}${res.reason ? ` (${res.reason})` : ""}. ` +
+              `From now on, every \`git push\` runs the git-check first and blocks if the diff isn't ` +
+              `production-ready. Override once with \`git push --no-verify\`.`
+            : `Couldn't install the hook: ${res.reason}.`;
+          console.log("\n  " + msg + "\n");
+          appendTurn(root, "shepherd", msg);
+          continue;
+        }
+        console.log(pc.dim("\n  Reviewing what you're about to push …"));
+        const result = await gitCheck(root, { deep: false });
+        printGitCheck(result);
+        if (result.isRepo && result.changed.length > 0) {
+          lastFindings = result.findings; // focus the session on the diff
+          const v = result.verdict;
+          const msg = v.ready
+            ? `Your diff (${result.changed.length} file(s)) is clear to push${v.advisoryCount ? ` — ${v.advisoryCount} advisory note(s) for later` : ""}.`
+            : `Hold the push — ${v.blockers.length} blocker(s) in the diff. Say “fix” for a work-order, or \`git push --no-verify\` to override. Want me to install a pre-push hook? say “/git-check install”.`;
+          appendTurn(root, "shepherd", msg);
+          if (!v.ready) console.log(pc.dim("  " + msg) + "\n");
+        }
         continue;
       }
 

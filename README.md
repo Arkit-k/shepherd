@@ -38,6 +38,7 @@ Prefer shortcuts? Type **`/`** for Claude-style slash commands — natural langu
 | `/review <file\|function>` | Focused code/function review |
 | `/scale` *(`/infra`)* | Infra roadmap to ~1M users + a written scale plan |
 | `/infra-cost` *(`/cost`)* | $ abuse exposure (cost-bombs) + infra bill at 1M, web-grounded |
+| `/git-check` *(`/git-check install`)* | Review only what you're about to push → go/no-go; `install` wires a pre-push hook |
 | `/tests <target>` | Design the essential tests + a work-order |
 | `/fix` | Write the fix work-order for your Claude Code session |
 | `/profile` | Show what Shepherd remembers about this project |
@@ -89,6 +90,19 @@ Shepherd is the same engineer every time, and it gets sharper the more you work 
 - **`.shepherd/candidate-rules/`** — rules Shepherd distilled from recurring findings, waiting for your review (move one into `~/.shepherd/packs/` to activate). Learning proposes; you commit.
 
 `config.json`, `SHEPHERD.md`, `triage.json` and `test.md` are meant to be committed (team-shared); history, reports, and the conversation log are gitignored by default.
+
+## The pre-push gate
+
+Don't push code that isn't production-ready. `/git-check` reviews **only what you're about to push** (staged + working tree + unpushed commits) — not the whole repo — and gives a focused go/no-go on the diff.
+
+Run **`/git-check install`** once and Shepherd writes a git `pre-push` hook, so the gate runs automatically on every `git push` and blocks the push if the diff has a blocker:
+
+```
+🐑  Shepherd blocked this push — the diff isn't production-ready (see above).
+    Fix the gates, or override once with: git push --no-verify
+```
+
+It's a heads-up, not a cage — `git push --no-verify` always lets a human override, and `SHEPHERD_SKIP_HOOK=1` disables it for a session.
 
 ## In CI (no one to talk to)
 

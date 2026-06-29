@@ -2,6 +2,7 @@
 import { printBanner } from "./banner.js";
 import { interactive } from "./interactive.js";
 import { runAgent } from "./agent.js";
+import { gitCheck, printGitCheck } from "./engine/gitcheck.js";
 
 // Shepherd is an AGENT, not a set of programs. There are no subcommands to learn.
 //
@@ -13,7 +14,18 @@ import { runAgent } from "./agent.js";
 // Shepherd falls back to doing the whole job autonomously once — survey, audit,
 // stress-test, hand off — and exits non-zero if it's not production-ready.
 async function main(): Promise<void> {
-  const path = process.argv[2] && !process.argv[2].startsWith("-") ? process.argv[2] : ".";
+  const args = process.argv.slice(2);
+  const path = args[0] && !args[0].startsWith("-") ? args[0] : ".";
+
+  // `--git-check` is internal plumbing for the pre-push hook (not a user-facing
+  // subcommand): review only what's about to be pushed and exit non-zero on a
+  // gate so git blocks the push. The autonomous gate, run automatically by git.
+  if (args.includes("--git-check")) {
+    const result = await gitCheck(path, { deep: false });
+    process.exitCode = printGitCheck(result);
+    return;
+  }
+
   const interactiveTTY = Boolean(process.stdin.isTTY && process.stdout.isTTY);
 
   await printBanner();
