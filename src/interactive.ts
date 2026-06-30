@@ -33,6 +33,8 @@ import { appendTurn, learnImportantTests } from "./engine/memory/conversation.js
 import { listTriage, suppressDismissed } from "./engine/memory/triage.js";
 import { triageFromText } from "./engine/memory/triage-parse.js";
 import { readTestLog } from "./engine/memory/tests-log.js";
+import { recordScan } from "./engine/ledger.js";
+import { annotate, prevalenceNote, insightsCard } from "./engine/insights.js";
 
 // Shepherd is an AGENT, not a set of programs. You start it and you talk to it.
 // It boots as a 200-year-old principal engineer (soul.md), already holding this
@@ -82,11 +84,15 @@ function preamble(root: string): string {
   ].join("\n");
 }
 
-type Intent = "exit" | "audit" | "autopilot" | "certify" | "release" | "design" | "rightsize" | "scale" | "cost" | "gitcheck" | "scaffold" | "fingerprint" | "fix" | "tests" | "learn" | "evolve" | "triage" | "help" | "chat";
+type Intent = "exit" | "audit" | "autopilot" | "certify" | "release" | "design" | "rightsize" | "insights" | "scale" | "cost" | "gitcheck" | "scaffold" | "fingerprint" | "fix" | "tests" | "learn" | "evolve" | "triage" | "help" | "chat";
 
 function intentOf(s: string): Intent {
   const t = s.trim().toLowerCase();
   if (/^(exit|quit|bye|:q|q)$/.test(t)) return "exit";
+  // Insights — the data flywheel: which findings are most common across the repos
+  // you've scanned. Checked early so "what's most common" isn't read as something else.
+  if (/\b(insights?|stats|statistics|ledger|trends?|most common|how common|prevalence|leaderboard|what (do|does) .*(usually|commonly) (break|fail))\b/.test(t))
+    return "insights";
   // Autopilot — the consultative loop. Ask the user what they want, then run
   // design → right-size → certify → release end to end. Checked first so "run the
   // whole loop" isn't swallowed by audit/design/certify.
@@ -147,6 +153,7 @@ const HELP = [
   "  • “review the architecture”            — I read the repo and assess the design at scale",
   "  • “design the architecture” / /design   — I author the BLUEPRINT to build from (target pattern, boundaries, design patterns, principles, infra plan)",
   "  • “am I over-engineering?” / /rightsize  — the YAGNI counterweight: I flag abstractions/infra you don't need yet (high- and low-level)",
+  "  • “what's most common?” / /insights      — the data flywheel: which findings recur most across the repos you've scanned (gets sharper every run)",
   "  • “review the function handleLogin in auth.ts”  — a focused code/function review",
   "  • “run the whole loop” / /autopilot    — I ASK what you want (scale, architecture, infra, deploy), then run design → right-size → certify → release",
   "  • “is it production ready?” / “audit”  — the full deterministic + deep audit + verdict",
@@ -179,6 +186,7 @@ const SLASH_HELP = [
   "  /architecture-review (/arch)             — design review at scale: layering, coupling, boundaries, data flow (diagnostic)",
   "  /design           (/spec, /blueprint)    — author the architecture BLUEPRINT to build from (prescriptive): target pattern, boundaries, patterns, principles, infra",
   "  /rightsize        (/yagni, /simplify)    — the YAGNI counterweight: flag over-engineering you don't need yet (premature infra, single-impl interfaces, …)",
+  "  /insights         (/stats, /ledger)      — the data flywheel: most common findings across the repos you've scanned (sharpens every run)",
   "  /security-review  (/security, /sec)      — focused security pass (authz, injection, secrets, exposure)",
   "  /review <file|function>                  — focused code/function review",
   "  /scale            (/scale-plan, /infra)  — infra roadmap to ~1M users + a written scale plan",
@@ -232,6 +240,8 @@ function translateSlash(raw: string): Slash {
       return { intent: "audit", line: raw };
     case "autopilot": case "pipeline": case "run-all": case "runall": case "loop":
       return { intent: "autopilot", line: raw };
+    case "insights": case "stats": case "ledger": case "trends": case "trend":
+      return { intent: "insights", line: raw };
     case "certify": case "prove": case "verify": case "certificate":
       return { intent: "certify", line: raw };
     case "release-check": case "release": case "ship-it": case "shipit": case "deploy-check": case "deploy":
@@ -383,6 +393,11 @@ export async function interactive(root = "."): Promise<number> {
     const result = await scan(root, { deep: false });
     lastFindings = result.findings;
     remember(root, result.repo, lastFindings); // refresh the living profile + trend
+    try {
+      if (!process.env.SHEPHERD_NO_LEDGER) recordScan(result.repo, lastFindings); // feed the data flywheel from interactive use too
+    } catch {
+      /* ledger is best-effort */
+    }
     // Fingerprint who built it the moment we wake up — it primes the whole review.
     try {
       const prov = detectProvenance(result.repo);
@@ -392,6 +407,8 @@ export async function interactive(root = "."): Promise<number> {
     }
     const verdict = goLiveVerdict(lastFindings);
     printVerdict(verdict);
+    const note = prevalenceNote(lastFindings);
+    if (note) console.log(pc.dim("  " + note + "\n"));
     console.log(
       pc.dim(
         `  (${lastFindings.length} findings from the quick pass. Try /go-live-checks for the full audit, ` +
@@ -596,7 +613,12 @@ export async function interactive(root = "."): Promise<number> {
           /* architect/finops are best-effort — never break the audit */
         }
         remember(root, result.repo, lastFindings); // refresh the living profile + trend
-        printReport(lastFindings);
+        try {
+          if (!process.env.SHEPHERD_NO_LEDGER) recordScan(result.repo, lastFindings); // feed the flywheel
+        } catch {
+          /* best-effort */
+        }
+        printReport(annotate(lastFindings)); // display copy carries prevalence; lastFindings stays raw
         if (scalePlanNote) console.log(pc.dim(scalePlanNote) + "\n");
         const verdict = goLiveVerdict(lastFindings);
         printVerdict(verdict);
@@ -651,6 +673,11 @@ export async function interactive(root = "."): Promise<number> {
           `When a slice is built, say “/certify” and I'll prove it matches.`;
         console.log(pc.dim(msg) + "\n");
         appendTurn(root, "shepherd", `Architecture spec → ${spec.targetPattern}.` + msg);
+        continue;
+      }
+
+      if (intent === "insights") {
+        console.log("\n" + insightsCard() + "\n");
         continue;
       }
 

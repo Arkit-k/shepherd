@@ -58,27 +58,31 @@ export interface LedgerStats {
   scans: number;
   repos: number;
   totalFindings: number;
-  checkFrequency: { id: string; total: number; scans: number }[];
+  // ranked: `repos` = distinct repos the check appeared in (the honest prevalence
+  // denominator); `scans` = scans it appeared in; `total` = raw occurrences.
+  checkFrequency: { id: string; total: number; scans: number; repos: number }[];
 }
 
 export function computeStats(entries: LedgerEntry[]): LedgerStats {
   const repos = new Set(entries.map((e) => e.repo));
-  const byCheck = new Map<string, { total: number; scans: number }>();
+  const byCheck = new Map<string, { total: number; scans: number; repos: Set<string> }>();
   let totalFindings = 0;
 
   for (const e of entries) {
     for (const [id, n] of Object.entries(e.checks)) {
-      const cur = byCheck.get(id) ?? { total: 0, scans: 0 };
+      const cur = byCheck.get(id) ?? { total: 0, scans: 0, repos: new Set<string>() };
       cur.total += n;
       cur.scans += 1;
+      cur.repos.add(e.repo);
       byCheck.set(id, cur);
       totalFindings += n;
     }
   }
 
+  // rank by how many distinct repos a check shows up in (prevalence), then volume.
   const checkFrequency = [...byCheck.entries()]
-    .map(([id, v]) => ({ id, ...v }))
-    .sort((a, b) => b.total - a.total);
+    .map(([id, v]) => ({ id, total: v.total, scans: v.scans, repos: v.repos.size }))
+    .sort((a, b) => b.repos - a.repos || b.total - a.total);
 
   return { scans: entries.length, repos: repos.size, totalFindings, checkFrequency };
 }

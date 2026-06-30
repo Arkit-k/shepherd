@@ -16,6 +16,7 @@ import { estimateCost, buildCostReport } from "./engine/finops.js";
 import { writeCostReport } from "./engine/handoff.js";
 import { printReport, dedupeFindings, type Finding } from "./engine/report.js";
 import { recordScan } from "./engine/ledger.js";
+import { annotate, prevalenceNote } from "./engine/insights.js";
 import { suppressDismissed } from "./engine/memory/triage.js";
 import { updateProfile } from "./engine/memory/profile.js";
 import { recordForEvolution } from "./engine/memory/evolution.js";
@@ -249,7 +250,11 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
     ]),
     repo.root,
   );
-  printReport(findings);
+  // annotate the DISPLAY with prevalence from prior history (before recording this
+  // scan), so common AI-failures are flagged as such; `findings` stays raw.
+  const flywheelNote = prevalenceNote(findings);
+  printReport(annotate(findings));
+  if (flywheelNote) console.log(pc.dim("  " + flywheelNote + "\n"));
   try {
     if (!process.env.SHEPHERD_NO_LEDGER) recordScan(repo, findings);
   } catch {
