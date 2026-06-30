@@ -16,6 +16,7 @@ import { hygieneItems, buildScaffoldOrder } from "./engine/hygiene.js";
 import { scaleArchitect } from "./engine/backend/architect.js";
 import { estimateCost, buildCostReport } from "./engine/finops.js";
 import { gitCheck, printGitCheck, installPrePushHook } from "./engine/gitcheck.js";
+import { detectProvenance, buildFingerprintCard } from "./engine/provenance.js";
 import { ingest } from "./engine/ingest.js";
 import { designTests } from "./engine/testgen.js";
 import { printReport, type Finding } from "./engine/report.js";
@@ -72,11 +73,15 @@ function preamble(root: string): string {
   ].join("\n");
 }
 
-type Intent = "exit" | "audit" | "scale" | "cost" | "gitcheck" | "scaffold" | "fix" | "tests" | "learn" | "evolve" | "triage" | "help" | "chat";
+type Intent = "exit" | "audit" | "scale" | "cost" | "gitcheck" | "scaffold" | "fingerprint" | "fix" | "tests" | "learn" | "evolve" | "triage" | "help" | "chat";
 
 function intentOf(s: string): Intent {
   const t = s.trim().toLowerCase();
   if (/^(exit|quit|bye|:q|q)$/.test(t)) return "exit";
+  // AI-provenance fingerprint — which builder made this repo. Checked early so a
+  // tool name ("is this a lovable app?") isn't swallowed by another intent.
+  if (/\b(fingerprint|provenance|who (built|made|wrote)|what (built|made|tool)|built by|which (ai|tool|builder)|is this (a )?(lovable|bolt|v0|replit|cursor|copilot|windsurf)|(lovable|bolt\.new|v0\.dev) app)\b/.test(t))
+    return "fingerprint";
   // Project-hygiene scaffolding — missing tooling/config files (Husky, linter, …).
   if (/\b(scaffold|hygiene|tooling|husky|lint(er|ing)?|prettier|formatter|editorconfig|dependabot|renovate|codeowners|missing (files?|config|tooling)|production[- ]?(level |grade )?files?|setup files?)\b/.test(t))
     return "scaffold";
@@ -112,6 +117,7 @@ const HELP = [
   "  • “is it production ready?” / “audit”  — the full deterministic + deep audit + verdict",
   "  • “how do I scale to 1M users?”         — I survey the system + research current infra (Redis/queue/Kafka/…) and write a scale plan",
   "  • “how much will this cost?”            — I price the abuse exposure (cost-bombs in $) + the infra bill at 1M, web-grounded",
+  "  • “who built this?” / /fingerprint      — I detect the AI builder (Lovable/Bolt/v0/…) and load that tool's known failure modes",
   "  • “check before I push” / /git-check    — I review only what you're about to push and give a go/no-go (install a pre-push hook with “/git-check install”)",
   "  • “write the fix work-order”           — I hand your Claude Code session a precise fix order",
   "  • “write tests for handler.js”         — I design the essential tests + a work-order to add them",
@@ -137,6 +143,7 @@ const SLASH_HELP = [
   "  /infra-cost       (/cost, /finops)       — $ abuse exposure (cost-bombs) + infra bill at 1M, web-grounded",
   "  /git-check        (/git-check install)   — review what you're about to push (verdict); 'install' wires a pre-push hook",
   "  /scaffold         (/hygiene, /tooling)   — find missing prod-grade files (Husky, linter, formatter, license…) + a work-order",
+  "  /fingerprint      (/provenance, /built-by) — detect the AI builder (Lovable/Bolt/v0/Replit/…) + that tool's known failure modes",
   "  /tests <target>   (/test)                — design the essential tests + a work-order",
   "  /fix              (/work-order)          — write the fix work-order for your Claude Code session",
   "  /triage <what>                           — record a won't-fix / false-positive (I stop raising it)",
@@ -190,6 +197,8 @@ function translateSlash(raw: string): Slash {
       return { intent: "gitcheck", line: arg.toLowerCase() === "install" ? "install" : raw };
     case "scaffold": case "hygiene": case "tooling":
       return { intent: "scaffold", line: raw };
+    case "fingerprint": case "provenance": case "built-by": case "builtby": case "whobuilt":
+      return { intent: "fingerprint", line: raw };
     case "fix": case "work-order": case "workorder": case "handoff":
       return { intent: "fix", line: raw };
     case "evolve": case "promote": return { intent: "evolve", line: raw };
@@ -248,6 +257,13 @@ export async function interactive(root = "."): Promise<number> {
     const result = await scan(root, { deep: false });
     lastFindings = result.findings;
     remember(root, result.repo, lastFindings); // refresh the living profile + trend
+    // Fingerprint who built it the moment we wake up — it primes the whole review.
+    try {
+      const prov = detectProvenance(result.repo);
+      if (prov.top) console.log("  " + buildFingerprintCard(prov).replace(/\n/g, "\n  ") + "\n");
+    } catch {
+      /* fingerprint is best-effort */
+    }
     const verdict = goLiveVerdict(lastFindings);
     printVerdict(verdict);
     console.log(
@@ -577,6 +593,26 @@ export async function interactive(root = "."): Promise<number> {
           `“create the files in ${orderPath.replace(/\\/g, "/")}”. None of these block a merge; they're the team guardrails.`;
         console.log(pc.dim(msg) + "\n");
         appendTurn(root, "shepherd", msg);
+        continue;
+      }
+
+      if (intent === "fingerprint") {
+        const repo = await ingest(root);
+        const prov = detectProvenance(repo);
+        console.log("\n" + buildFingerprintCard(prov) + "\n");
+        if (prov.findings.length) {
+          // fold the builder's failure-mode priors into what's in front of us, so a
+          // follow-up review/fix is primed by who built it.
+          const ids = new Set(lastFindings.map((f) => f.id));
+          lastFindings = [...lastFindings, ...prov.findings.filter((f) => !ids.has(f.id))];
+        }
+        const msg = prov.top
+          ? `Fingerprinted as ${prov.top.name} (${Math.round(prov.top.confidence * 100)}% confidence). ` +
+            (prov.top.klass === "generator"
+              ? `I've loaded ${prov.top.name}'s known failure modes as priors — ask me to “review security” and I'll check them against this repo specifically.`
+              : `That's an AI-assist marker, so I'll watch for drift and partial refactors during review.`)
+          : "No AI-builder fingerprint — I'll review on general priors.";
+        appendTurn(root, "shepherd", buildFingerprintCard(prov) + "\n" + msg);
         continue;
       }
 

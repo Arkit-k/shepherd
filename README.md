@@ -40,6 +40,7 @@ Prefer shortcuts? Type **`/`** for Claude-style slash commands — natural langu
 | `/infra-cost` *(`/cost`)* | $ abuse exposure (cost-bombs) + infra bill at 1M, web-grounded |
 | `/git-check` *(`/git-check install`)* | Review only what you're about to push → go/no-go; `install` wires a pre-push hook |
 | `/scaffold` *(`/hygiene`)* | Find missing production-grade files (Husky, linter, formatter, license, …) + a work-order |
+| `/fingerprint` *(`/provenance`, `/built-by`)* | Detect the AI builder (Lovable / Bolt / v0 / Replit / …) and load that tool's known failure modes |
 | `/tests <target>` | Design the essential tests + a work-order |
 | `/fix` | Write the fix work-order for your Claude Code session |
 | `/profile` | Show what Shepherd remembers about this project |
@@ -48,6 +49,7 @@ Prefer shortcuts? Type **`/`** for Claude-style slash commands — natural langu
 ## Why Shepherd
 
 - **It knows how *AI* code fails.** The detectors target the specific failure modes of generated code — public AI/email endpoints with no rate limit, secrets in the client bundle, access control enforced only on the frontend, deprecated libraries the model still reaches for.
+- **It knows *who* built it.** Shepherd fingerprints the AI builder from structural signatures — Lovable, Bolt, v0, Replit, Cursor, Claude, Copilot, Windsurf — and loads *that tool's* known failure modes before it reviews. *"This is a Lovable app — RLS is your only access control and it's usually off; the Edge Functions have no rate limit."* A generic scanner can't make that call; the per-tool failure corpus is the moat.
 - **It's grounded, not hand-wavy.** When you ask for a review, the agent runs Shepherd's *own* deterministic detectors (via its built-in MCP server) and quotes the real findings — reviews are backed by the engine, not vibes.
 - **It thinks about *scale*, not just bugs.** Ask how to reach a million users and Shepherd becomes a principal infrastructure architect: it reads the system, finds the workload pressures (inline email, `ILIKE` search, in-memory sessions, a single DB pool), and prescribes the infrastructure to fix them — a cache, a task queue, an event stream, search, read replicas — naming current, actively-maintained open-source tools it confirms on the **live web**. A broken weekend project gets a credible road to production load.
 - **It remembers.** Across runs Shepherd keeps the project's recurring soft spots, your triage decisions ("ruled a false-positive because X"), and the tests that matter here — and recalls them before it judges, so it doesn't re-litigate what you've settled.

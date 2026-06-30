@@ -6,6 +6,7 @@ import { security } from "./detectors/security.js";
 import { loadRules, applyRules } from "./rules/registry.js";
 import { operationsChecks } from "./operations.js";
 import { projectHygiene } from "./hygiene.js";
+import { provenanceFindings } from "./provenance.js";
 import { analyzeStructure } from "./structure.js";
 import { betterPatterns } from "./idioms.js";
 import { designPatterns } from "./design-patterns.js";
@@ -40,6 +41,7 @@ export async function scan(root: string, opts: ScanOptions = {}): Promise<ScanRe
     ...applyRules(repo, loadRules()), // community / AI-tool rule packs
     ...operationsChecks(repo, { audit: false }), // observability, .env hygiene, CI, Dockerfile
     ...projectHygiene(repo), // team-hygiene scaffolding: Husky, linter, formatter, license, …
+    ...provenanceFindings(repo), // AI-builder fingerprint → that tool's known failure-mode priors
     ...analyzeStructure(repo).findings, // layer-vs-feature organization
     ...betterPatterns(repo, { deep: false }), // modern-idiom upgrades
     ...designPatterns(repo, { deep: false }), // design patterns + trade-offs
