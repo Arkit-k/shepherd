@@ -9,6 +9,7 @@ import { analyzeStructure, type StructureStyle } from "./structure.js";
 import { scaleArchitect, type InfraPrescription } from "./backend/architect.js";
 import { claudeAvailable } from "./fixers/claude.js";
 import { claudeAgentJsonArray } from "./claude-json.js";
+import { type LoopChoices, SCALE_LABEL } from "./intent.js";
 
 // SPEC-FIRST mode — the inversion. Every other axis judges code AFTER it's written
 // (diagnostic). This authors the architecture/design BLUEPRINT the user's Claude
@@ -87,6 +88,52 @@ function recommendTarget(patterns: string[], shape: BackendShape): { targetPatte
   };
 }
 
+// Shepherd's recommended target — exported so the consultative intake can SHOW it
+// as the default ("here's what I'd build; accept or override").
+export function recommendedTarget(repo: Repo): { targetPattern: string; rationale: string } {
+  const { shape } = classifyShape(repo);
+  const { patterns } = classifyProduction(repo);
+  return recommendTarget(patterns, shape);
+}
+
+// When the user OVERRIDES the recommendation with an explicit architecture choice,
+// the spec is built to their pick — here's the discipline that makes each work.
+const ARCH_RATIONALE: Record<string, string> = {
+  "modular monolith":
+    "A modular monolith: feature modules with explicit boundaries over a framework-free domain core. The highest-leverage shape for most teams — the boundary benefits without distributed-systems pain. Extract a module only when its load or ownership truly demands it.",
+  microservices:
+    "Microservices: align each service to a bounded context with typed contracts between them. You're taking on network calls, distributed transactions, and ops overhead — keep the boundaries clean and make sure the team/scale justifies the tax.",
+  serverless:
+    "Serverless: keep functions thin (a function is a transport adapter), put the logic in a framework-free core they call so it's testable and portable, and watch cold-starts + per-invocation cost.",
+  "event-driven":
+    "Event-driven: a durable broker (not an in-process EventEmitter), a dedicated worker pool for async work, and idempotent handlers with retries + a dead-letter queue.",
+};
+
+function resolveTarget(
+  repo: Repo,
+  choices?: LoopChoices,
+): { targetPattern: string; rationale: string; chosen: boolean } {
+  if (choices?.architecture) {
+    const key = Object.keys(ARCH_RATIONALE).find((k) => choices.architecture!.toLowerCase().includes(k));
+    return {
+      targetPattern: choices.architecture,
+      rationale: key ? ARCH_RATIONALE[key] : `You chose ${choices.architecture}. Build it with a framework-free domain core, validate at the boundary, and keep the transport layer thin.`,
+      chosen: true,
+    };
+  }
+  return { ...recommendedTarget(repo), chosen: false };
+}
+
+// Keep only the infra the user opted into.
+function filterInfra(prescriptions: InfraPrescription[], choices?: LoopChoices): InfraPrescription[] {
+  if (!choices || choices.infraAll) return prescriptions;
+  if (!choices.infra.length) return [];
+  const wanted = choices.infra.map((s) => s.toLowerCase());
+  return prescriptions.filter((p) =>
+    wanted.some((w) => p.component.toLowerCase().includes(w) || p.recommendation.toLowerCase().includes(w)),
+  );
+}
+
 // The industry-standard coding principles, stated as HARD CONSTRAINTS Claude must
 // follow while building. Deterministic — the moat doesn't need a model for these.
 const PRINCIPLES: Array<{ id: string; rule: string }> = [
@@ -114,10 +161,11 @@ const PATTERN_GUIDANCE: Array<{ use: string }> = [
 
 function buildMarkdown(
   inputs: SpecInputs,
-  target: { targetPattern: string; rationale: string },
+  target: { targetPattern: string; rationale: string; chosen: boolean },
   prescriptions: InfraPrescription[],
   blueprint: BlueprintSection[],
   ts: string,
+  choices?: LoopChoices,
 ): string {
   const lines: string[] = [
     `# Shepherd — architecture & design spec`,
@@ -128,10 +176,12 @@ function buildMarkdown(
     ``,
     `- **Stack:** ${inputs.stack}`,
     `- **Detected today:** ${inputs.shape} · pattern(s): ${inputs.patterns.join(", ")} · ${inputs.structure}-based structure${inputs.comms.length ? ` · comms: ${inputs.comms.join(", ")}` : ""}`,
+    ...(choices ? [`- **Building for:** ${SCALE_LABEL[choices.scale]} _(your call — it sets how much infra is warranted)_`] : []),
+    ...(choices?.note ? [`- **Your note:** ${choices.note}`] : []),
     ``,
     `## 1. Target architecture`,
     ``,
-    `**${target.targetPattern}**`,
+    `**${target.targetPattern}**${target.chosen ? " _(your choice)_" : " _(Shepherd's recommendation — override anytime)_"}`,
     ``,
     target.rationale,
     ``,
@@ -235,7 +285,10 @@ function authorBlueprint(repo: Repo, inputs: SpecInputs, target: string, opts: {
     .map((s) => ({ title: String(s.title), body: String(s.body) }));
 }
 
-export function architectureSpec(repo: Repo, opts: { web?: boolean; budgetUsd?: number } = {}): ArchitectureSpec {
+export function architectureSpec(
+  repo: Repo,
+  opts: { web?: boolean; budgetUsd?: number; prescriptions?: InfraPrescription[]; choices?: LoopChoices } = {},
+): ArchitectureSpec {
   const tech = detectStack(repo);
   const stack = `${tech.language}, ${tech.frameworks.join(", ") || "—"}`;
   const { shape, comms } = classifyShape(repo);
@@ -243,21 +296,25 @@ export function architectureSpec(repo: Repo, opts: { web?: boolean; budgetUsd?: 
   const structure = analyzeStructure(repo).style;
   const inputs: SpecInputs = { stack, shape, comms, patterns, infra, structure };
 
-  const target = recommendTarget(patterns, shape);
+  // honor the user's architecture choice; fall back to Shepherd's recommendation.
+  const target = resolveTarget(repo, opts.choices);
 
-  // The infra plan — reuse the web-grounded scale architect (skipped if no Claude).
-  let prescriptions: InfraPrescription[] = [];
-  if (claudeAvailable() && opts.web !== false) {
+  // The infra plan — reuse already-computed prescriptions (the autonomous run
+  // already ran the scale architect), else run the web-grounded architect here.
+  let prescriptions: InfraPrescription[] = opts.prescriptions ?? [];
+  if (!prescriptions.length && claudeAvailable() && opts.web !== false) {
     try {
       prescriptions = scaleArchitect(repo, { web: opts.web ?? true }).prescriptions;
     } catch {
       /* infra plan is best-effort */
     }
   }
+  // keep only the infra the user opted into.
+  prescriptions = filterInfra(prescriptions, opts.choices);
 
   const blueprint = authorBlueprint(repo, inputs, target.targetPattern, opts);
   const ts = new Date().toISOString();
-  const markdown = buildMarkdown(inputs, target, prescriptions, blueprint, ts);
+  const markdown = buildMarkdown(inputs, target, prescriptions, blueprint, ts, opts.choices);
 
   return { inputs, targetPattern: target.targetPattern, rationale: target.rationale, prescriptions, blueprint, markdown };
 }

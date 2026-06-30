@@ -32,6 +32,9 @@ import { writeReport } from "./engine/report-file.js";
 import { goLiveVerdict, printVerdict } from "./engine/gate.js";
 import { runTests } from "./engine/testrun.js";
 import { certify, printCertificate, buildCertificateMarkdown, writeCertificate } from "./engine/certify.js";
+import { architectureSpec, writeArchitectureSpec } from "./engine/spec.js";
+import { releaseReadiness, printReleaseReadiness, buildDeployOrder, writeDeployOrder } from "./engine/release.js";
+import { readChoices } from "./engine/intent.js";
 import { loadProject } from "./engine/project.js";
 
 interface AgentOptions {
@@ -70,6 +73,10 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
 
   // first run installs .shepherd/ and tracks the project from here on.
   loadProject(root);
+  // the user's saved intent (scale / architecture / infra / deploy), set in an
+  // interactive `/autopilot` session — reused here so the autonomous run honors the
+  // same decisions. Null on a fresh project → Shepherd's own recommendations.
+  const choices = readChoices(root);
 
   // ① Surveyor — what is this app, how is it built, and how is it organized?
   phase(1, "Survey", "Surveyor");
@@ -170,6 +177,16 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
         /* report is best-effort */
       }
     }
+
+    // DESIGN — author the architecture blueprint (reusing the prescriptions we just
+    // computed), built to the user's saved intent if they ran /autopilot.
+    try {
+      const spec = architectureSpec(repo, { web: true, prescriptions: arch.prescriptions, choices: choices ?? undefined });
+      const specPath = writeArchitectureSpec(root, spec.markdown);
+      console.log(pc.dim(`  Design spec → ${specPath.replace(/\\/g, "/")} (target: ${spec.targetPattern})`));
+    } catch {
+      /* spec is best-effort */
+    }
   }
 
   // design patterns + trade-offs, judged AS PER THIS PROJECT (stack/pattern/scale).
@@ -189,8 +206,9 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
 
   const scaleFindings = scaleAndResilience(repo, { deep: hasClaude });
   const feFindings = frontendScale(repo, { deep: hasClaude });
-  // the YAGNI counterweight — over-engineering judgment (knowing when to STOP).
-  const rightSizeFindings = rightSizing(repo, { deep: hasClaude });
+  // the YAGNI counterweight — over-engineering judgment (knowing when to STOP),
+  // calibrated to the user's declared scale if they set one.
+  const rightSizeFindings = rightSizing(repo, { deep: hasClaude, scale: choices?.scale });
   const live = await liveProbe(repo);
   const liveProbeRan = live.length > 0 || true; // attempted; probe logs if skipped
 
@@ -278,6 +296,20 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
     if (cp) console.log(pc.dim(`  🔏 Certificate: ${cp.replace(/\\/g, "/")}`));
   } catch {
     /* certify is best-effort — never break the run */
+  }
+
+  // ⑤·6 Release gate — the certificate just bound itself to HEAD; is this build
+  // clear to deploy? (gate the deploy, don't do it). Authors a gated CI/CD pipeline
+  // work-order if none exists.
+  try {
+    const release = releaseReadiness(root);
+    printReleaseReadiness(release);
+    if (!release.hasPipeline && release.isRepo) {
+      const dp = writeDeployOrder(root, buildDeployOrder(ts, choices?.deployTarget));
+      console.log(pc.dim(`  No deploy pipeline yet → gated CI/CD work-order: ${dp.replace(/\\/g, "/")}`));
+    }
+  } catch {
+    /* release gate is best-effort */
   }
 
   // ⑥ Hand-off — Shepherd is the maintainer, not the editor. It writes a precise

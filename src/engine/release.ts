@@ -116,11 +116,12 @@ export function printReleaseReadiness(r: ReleaseReadiness): number {
 
 // The CI/CD pipeline work-order — Shepherd describes a deploy pipeline with its own
 // gate baked in; the user's Claude Code writes the YAML. Maintainer model.
-export function buildDeployOrder(ts: string): string {
+export function buildDeployOrder(ts: string, deployTarget?: string): string {
   return [
     `# Shepherd — deploy pipeline work-order`,
     ``,
     `_Generated ${ts}. Shepherd describes the gated CI/CD pipeline; you create it in your Claude Code session._`,
+    ...(deployTarget ? [``, `**Deploy target:** ${deployTarget} — write the deploy stage for this platform.`] : []),
     ``,
     `Goal: **never deploy an unproven build.** The pipeline runs the gate before it ships, so a red`,
     `suite or an open production blocker stops the release automatically — not just on your machine.`,

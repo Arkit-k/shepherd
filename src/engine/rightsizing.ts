@@ -201,10 +201,18 @@ function judgmentPass(repo: Repo): Finding[] {
     }));
 }
 
-export function rightSizing(repo: Repo, opts: { deep?: boolean } = {}): Finding[] {
-  // "small" is our proxy for "you probably don't have the scale problem yet."
+export function rightSizing(
+  repo: Repo,
+  opts: { deep?: boolean; scale?: "small" | "growing" | "large" } = {},
+): Finding[] {
+  // The user's DECLARED scale wins: "small" → apply YAGNI hard (heavy infra is
+  // premature); "large" → infra is expected, so suppress those high-level flags;
+  // otherwise fall back to repo size as the proxy for "you don't have it yet."
+  // (Single-impl interfaces are flagged regardless — that's over-abstraction at
+  // any scale.)
   const totalLines = repo.files.reduce((s, f) => s + f.lines, 0);
-  const small = repo.files.length <= 25 || totalLines <= 2500;
+  const sizeSmall = repo.files.length <= 25 || totalLines <= 2500;
+  const small = opts.scale === "small" ? true : opts.scale === "large" ? false : sizeSmall;
 
   const findings: Finding[] = [
     ...singleImplInterfaces(repo),

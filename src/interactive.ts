@@ -22,6 +22,10 @@ import { certify, openObjectives, printCertificate, buildCertificateMarkdown, wr
 import { architectureSpec, writeArchitectureSpec } from "./engine/spec.js";
 import { rightSizing } from "./engine/rightsizing.js";
 import { releaseReadiness, printReleaseReadiness, buildDeployOrder, writeDeployOrder, checkDeployedHealth } from "./engine/release.js";
+import { runLoop } from "./engine/pipeline.js";
+import { recommendedTarget } from "./engine/spec.js";
+import { readChoices, writeChoices, summarizeChoices, type LoopChoices, type TargetScale } from "./engine/intent.js";
+import type { InfraPrescription } from "./engine/backend/architect.js";
 import { ingest } from "./engine/ingest.js";
 import { designTests } from "./engine/testgen.js";
 import { printReport, type Finding } from "./engine/report.js";
@@ -78,11 +82,16 @@ function preamble(root: string): string {
   ].join("\n");
 }
 
-type Intent = "exit" | "audit" | "certify" | "release" | "design" | "rightsize" | "scale" | "cost" | "gitcheck" | "scaffold" | "fingerprint" | "fix" | "tests" | "learn" | "evolve" | "triage" | "help" | "chat";
+type Intent = "exit" | "audit" | "autopilot" | "certify" | "release" | "design" | "rightsize" | "scale" | "cost" | "gitcheck" | "scaffold" | "fingerprint" | "fix" | "tests" | "learn" | "evolve" | "triage" | "help" | "chat";
 
 function intentOf(s: string): Intent {
   const t = s.trim().toLowerCase();
   if (/^(exit|quit|bye|:q|q)$/.test(t)) return "exit";
+  // Autopilot — the consultative loop. Ask the user what they want, then run
+  // design → right-size → certify → release end to end. Checked first so "run the
+  // whole loop" isn't swallowed by audit/design/certify.
+  if (/\b(autopilot|auto[- ]?pilot|run (the )?(whole|full|entire|complete) (thing|loop|pipeline|flow)|the (whole|full) loop|do everything|run all|end[- ]to[- ]end|ship me to production|take me to production)\b/.test(t))
+    return "autopilot";
   // Certify — the closed proof loop: re-scan + run the tests, prove the fixes,
   // emit a reproducible certificate. Checked before audit/tests so "prove it's
   // fixed" / "certify this" isn't read as a plain audit or test-design request.
@@ -139,6 +148,7 @@ const HELP = [
   "  • “design the architecture” / /design   — I author the BLUEPRINT to build from (target pattern, boundaries, design patterns, principles, infra plan)",
   "  • “am I over-engineering?” / /rightsize  — the YAGNI counterweight: I flag abstractions/infra you don't need yet (high- and low-level)",
   "  • “review the function handleLogin in auth.ts”  — a focused code/function review",
+  "  • “run the whole loop” / /autopilot    — I ASK what you want (scale, architecture, infra, deploy), then run design → right-size → certify → release",
   "  • “is it production ready?” / “audit”  — the full deterministic + deep audit + verdict",
   "  • “prove it's fixed” / /certify        — I re-scan, RUN your tests, and prove each gate closed → a reproducible certificate",
   "  • “clear to deploy?” / /release-check   — the release gate: ship only a proven build (cert is fresh + matches HEAD + clean); writes a gated CI/CD pipeline; checks a live URL's health",
@@ -162,6 +172,7 @@ const HELP = [
 // intent (so there's one code path) or to a framed review the brain answers.
 const SLASH_HELP = [
   "Slash commands — shortcuts for what I do (plain English works too):",
+  "  /autopilot        (/pipeline, /run-all)  — consultative loop: I ASK (scale/architecture/infra/deploy), then design → right-size → certify → release",
   "  /go-live-checks   (/audit, /ship)        — full audit (deterministic + deep + scale + cost) → go-live verdict",
   "  /certify          (/prove, /verify)      — re-scan + RUN the tests, prove each gate closed → a reproducible certificate",
   "  /release-check    (/ship-it, /deploy)    — release gate: deploy only a PROVEN build; “pipeline” writes a gated CI/CD work-order; “<url>” health-checks a deploy",
@@ -219,6 +230,8 @@ function translateSlash(raw: string): Slash {
     case "exit": case "quit": case "q": return { intent: "exit", line: raw };
     case "audit": case "go-live": case "go-live-checks": case "golive": case "ship":
       return { intent: "audit", line: raw };
+    case "autopilot": case "pipeline": case "run-all": case "runall": case "loop":
+      return { intent: "autopilot", line: raw };
     case "certify": case "prove": case "verify": case "certificate":
       return { intent: "certify", line: raw };
     case "release-check": case "release": case "ship-it": case "shipit": case "deploy-check": case "deploy":
@@ -274,6 +287,80 @@ function remember(root: string, repo: Repo, findings: Finding[]): void {
   } catch {
     /* best-effort */
   }
+}
+
+// The consultative INTAKE — Shepherd interviews its user before the loop runs.
+// At each step it shows its own recommendation as the default; the user accepts or
+// overrides. Choices are persisted so the next run can reuse them. Uses the REPL's
+// own readline, so this only runs in an interactive session (CI reuses saved intent).
+async function runIntake(
+  rl: readline.Interface,
+  root: string,
+  recommended: string,
+  prescriptions: InfraPrescription[],
+): Promise<LoopChoices> {
+  const saved = readChoices(root);
+  if (saved) {
+    console.log(pc.dim("\n  I have your saved choices:\n   ") + summarizeChoices(saved));
+    const use = (await rl.question(pc.cyan("  Use these? [Y/edit] "))).trim().toLowerCase();
+    if (use === "" || use === "y" || use === "yes") return saved;
+  }
+
+  console.log(pc.bold("\n  A few questions before I run the loop — accept my recommendation or override.\n"));
+
+  // 1. target scale — the call that decides whether infra is "needed" or "premature".
+  const scaleAns = (await rl.question(
+    pc.cyan("  Building for?  1) small / just starting   2) growing (thousands)   3) ~1M+   [1] "),
+  )).trim();
+  const scale: TargetScale =
+    scaleAns.startsWith("3") || /1\s*m|million|large|high traffic/i.test(scaleAns)
+      ? "large"
+      : scaleAns.startsWith("2") || /grow|thousand/i.test(scaleAns)
+        ? "growing"
+        : "small";
+
+  // 2. architecture — Shepherd's recommendation is the default.
+  console.log(pc.dim(`\n  Architecture — I recommend: `) + pc.bold(recommended) + pc.dim("."));
+  const archAns = (await rl.question(
+    pc.cyan("  [enter] to accept, or 1) modular monolith  2) microservices  3) serverless  4) event-driven  "),
+  )).trim();
+  const ARCH = ["modular monolith", "microservices", "serverless", "event-driven"];
+  const architecture = archAns === "" ? undefined : /^[1-4]$/.test(archAns) ? ARCH[Number(archAns) - 1] : archAns;
+
+  // 3. infrastructure — show what Shepherd would add; user keeps all / none / a subset.
+  let infraAll = false;
+  let infra: string[] = [];
+  if (prescriptions.length) {
+    console.log(pc.dim("\n  Infrastructure I'd add for this workload:"));
+    prescriptions.forEach((p, i) => console.log(`   ${i + 1}) ${pc.bold(p.component)} — ${p.recommendation}`));
+    const ans = (await rl.question(pc.cyan("  Include which? [enter]=all, 'none', or comma numbers (e.g. 1,3)  "))).trim().toLowerCase();
+    if (ans === "" || ans === "all") {
+      infraAll = true;
+      infra = prescriptions.map((p) => p.component);
+    } else if (ans === "none") {
+      infra = [];
+    } else {
+      const picks = ans.split(/[,\s]+/).map(Number).filter((n) => n >= 1 && n <= prescriptions.length);
+      infra = picks.map((n) => prescriptions[n - 1].component);
+    }
+  } else {
+    console.log(pc.dim("\n  No extra infrastructure warranted for what I can see — keeping it lean."));
+  }
+
+  // 4. deploy target — tunes the deploy work-order + post-deploy health check.
+  const depAns = (await rl.question(
+    pc.cyan("\n  Deploy target? 1) Vercel 2) Fly.io 3) Render 4) Docker+k8s 5) other/skip   [5] "),
+  )).trim();
+  const DEP = ["Vercel", "Fly.io", "Render", "Docker + Kubernetes"];
+  const deployTarget = /^[1-4]$/.test(depAns) ? DEP[Number(depAns) - 1] : depAns && !/^5|skip/i.test(depAns) ? depAns : undefined;
+
+  // 5. open note.
+  const note = (await rl.question(pc.cyan("\n  Anything else I should know? (enter to skip)  "))).trim() || undefined;
+
+  const choices: LoopChoices = { scale, architecture, infraAll, infra, deployTarget, note, ts: new Date().toISOString() };
+  writeChoices(root, choices);
+  console.log(pc.dim("\n  Saved to .shepherd/intent.json — I'll reuse this next time (say “/autopilot” and pick 'edit' to change it).\n"));
+  return choices;
 }
 
 export async function interactive(root = "."): Promise<number> {
@@ -440,6 +527,40 @@ export async function interactive(root = "."): Promise<number> {
           `files — apply it in your Claude Code session: “apply the tests in ${design.orderPath.replace(/\\/g, "/")}”.`;
         console.log(pc.dim("  " + note) + "\n");
         appendTurn(root, "shepherd", design.order + "\n" + note);
+        continue;
+      }
+
+      if (intent === "autopilot") {
+        console.log(
+          pc.bold("\n  🐑 Autopilot") +
+            pc.dim(" — I'll ask what you want, then run the whole loop: design → right-size → certify → release.\n"),
+        );
+        const repo = await ingest(root);
+        const recommended = recommendedTarget(repo).targetPattern;
+        // the infra Shepherd would prescribe — shown in the intake, reused in the loop.
+        let prescriptions: InfraPrescription[] = [];
+        process.stdout.write(pc.dim("  (sizing up the infrastructure this needs …)\r"));
+        try {
+          prescriptions = scaleArchitect(repo, { web: true }).prescriptions;
+        } catch {
+          /* no infra prescription — fine */
+        }
+        process.stdout.write("                                          \r");
+
+        const choices = await runIntake(rl, root, recommended, prescriptions);
+        const res = await runLoop(root, { web: true, choices, prescriptions });
+        lastFindings = res.findings;
+
+        const certified = res.certificate.certified;
+        const ready = res.release.ready;
+        const msg =
+          `Loop complete — ${certified ? "✅ certified" : "not certified"}, ${ready ? "🟢 clear to deploy" : "🔴 hold the deploy"}. ` +
+          `Spec, certificate${res.release.hasPipeline ? "" : ", and a gated deploy work-order"} are in .shepherd/. ` +
+          (certified && ready
+            ? "Build it to the spec, then ship."
+            : "Build/fix against the spec, then say “/autopilot” again (or “/certify”) to re-prove.");
+        console.log("  " + msg + "\n");
+        appendTurn(root, "shepherd", msg);
         continue;
       }
 

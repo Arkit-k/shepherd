@@ -32,6 +32,7 @@ Prefer shortcuts? Type **`/`** for Claude-style slash commands — natural langu
 
 | Command | What it does |
 |---|---|
+| `/autopilot` *(`/pipeline`, `/run-all`)* | **The whole loop, consultatively** — Shepherd *asks* what you want (scale, architecture, infra, deploy), then runs design → right-size → certify → release |
 | `/go-live-checks` *(`/audit`)* | Full audit — deterministic + deep review + scale + cost → go-live verdict |
 | `/certify` *(`/prove`, `/verify`)* | Re-scan + **run your tests**, prove each gate closed → a reproducible `.shepherd/certificate.md` |
 | `/release-check` *(`/ship-it`, `/deploy`)* | Release gate — deploy only a **proven** build (cert fresh + matches HEAD + clean); `pipeline` writes a gated CI/CD work-order; `<url>` health-checks a deploy |
@@ -87,6 +88,28 @@ Ask *“audit”* (or run it in CI — see below) and Shepherd runs the full wal
    + 1 advisory. Estimated about a week to green.
   ════════════════════════════════════════
 ```
+
+## Autopilot — it asks, then runs the whole loop
+
+The four stages — design, right-size, certify, release — run as one loop with `/autopilot`. But Shepherd doesn't *assume* what you're building; it **interviews you first**, showing its own recommendation at each step (accept or override):
+
+```
+🐑 Autopilot — I'll ask what you want, then run the whole loop.
+
+  Building for?  1) small / just starting   2) growing   3) ~1M+   [1]  ▸ 3
+  Architecture — I recommend: Modular monolith.  [enter] to accept, or 1–4  ▸ ⏎
+  Infrastructure I'd add:  1) Redis (cache)  2) BullMQ (queue)  3) Meilisearch (search)
+  Include which? [enter]=all, 'none', or comma numbers  ▸ 1,2
+  Deploy target? 1) Vercel 2) Fly 3) Render 4) Docker+k8s 5) skip  ▸ 2
+  Anything else I should know?  ▸ keep the public API stable
+
+  ①  Design     → architecture-spec.md  (built to your choices)
+  ②  Right-size → calibrated to "~1M+", so the infra you picked isn't flagged
+  ③  Certify    → ran your tests → certificate.md
+  ④  Release    → 🟢 clear to deploy
+```
+
+Your answers are saved to `.shepherd/intent.json` and reused next time (it offers `[Y/edit]` instead of re-asking) — and the non-interactive `npx shepherd` run honors the same choices. Crucially, **your declared scale is what calibrates the judgment**: say "~1M+" and Redis/Kafka is *needed*; say "small" and the same infra gets flagged as over-engineering. You set the horizon; Shepherd advises against it.
 
 ## The certificate — proof, not opinion
 
