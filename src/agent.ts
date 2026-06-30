@@ -29,6 +29,8 @@ import { liveProbe } from "./engine/backend/probe.js";
 import { loadTest } from "./engine/backend/loadtest.js";
 import { writeReport } from "./engine/report-file.js";
 import { goLiveVerdict, printVerdict } from "./engine/gate.js";
+import { runTests } from "./engine/testrun.js";
+import { certify, printCertificate, buildCertificateMarkdown, writeCertificate } from "./engine/certify.js";
 import { loadProject } from "./engine/project.js";
 
 interface AgentOptions {
@@ -258,6 +260,21 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
   if (reportPath) console.log(pc.dim(`\n  📄 Detailed report: ${reportPath.replace(/\\/g, "/")}`));
 
   printVerdict(verdict);
+
+  // ⑤·5 Certify — the closed proof loop. Run the real test suite and bind it to the
+  // gate, so the verdict is a reproducible CERTIFICATE, not just an opinion. The
+  // live probe already ran this pass, so empirical objectives can be proven too.
+  try {
+    console.log(pc.dim("\n  Certifying — running your test suite (I run tests; I never edit code) …"));
+    const testResult = runTests(root);
+    if (!testResult.ran) console.log(pc.yellow(`  ⚠️  No suite ran: ${testResult.reason}.`));
+    const cert = certify(root, { freshFindings: findings, testResult, probeRan: liveProbeRan, ts });
+    printCertificate(cert);
+    const cp = writeCertificate(root, buildCertificateMarkdown(cert));
+    if (cp) console.log(pc.dim(`  🔏 Certificate: ${cp.replace(/\\/g, "/")}`));
+  } catch {
+    /* certify is best-effort — never break the run */
+  }
 
   // ⑥ Hand-off — Shepherd is the maintainer, not the editor. It writes a precise
   //    fix work-order and hands it to the user's OWN Claude Code session.

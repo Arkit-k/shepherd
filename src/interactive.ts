@@ -17,6 +17,8 @@ import { scaleArchitect } from "./engine/backend/architect.js";
 import { estimateCost, buildCostReport } from "./engine/finops.js";
 import { gitCheck, printGitCheck, installPrePushHook } from "./engine/gitcheck.js";
 import { detectProvenance, buildFingerprintCard } from "./engine/provenance.js";
+import { runTests } from "./engine/testrun.js";
+import { certify, openObjectives, printCertificate, buildCertificateMarkdown, writeCertificate } from "./engine/certify.js";
 import { ingest } from "./engine/ingest.js";
 import { designTests } from "./engine/testgen.js";
 import { printReport, type Finding } from "./engine/report.js";
@@ -73,11 +75,16 @@ function preamble(root: string): string {
   ].join("\n");
 }
 
-type Intent = "exit" | "audit" | "scale" | "cost" | "gitcheck" | "scaffold" | "fingerprint" | "fix" | "tests" | "learn" | "evolve" | "triage" | "help" | "chat";
+type Intent = "exit" | "audit" | "certify" | "scale" | "cost" | "gitcheck" | "scaffold" | "fingerprint" | "fix" | "tests" | "learn" | "evolve" | "triage" | "help" | "chat";
 
 function intentOf(s: string): Intent {
   const t = s.trim().toLowerCase();
   if (/^(exit|quit|bye|:q|q)$/.test(t)) return "exit";
+  // Certify — the closed proof loop: re-scan + run the tests, prove the fixes,
+  // emit a reproducible certificate. Checked before audit/tests so "prove it's
+  // fixed" / "certify this" isn't read as a plain audit or test-design request.
+  if (/\b(certif(y|ied|icate)|prove it|prove the fix|verify the fix|is it (actually )?fixed|re[- ]?verify|proof|are the gates? (closed|fixed)|sign off|shepherd[- ]?certif)\b/.test(t))
+    return "certify";
   // AI-provenance fingerprint — which builder made this repo. Checked early so a
   // tool name ("is this a lovable app?") isn't swallowed by another intent.
   if (/\b(fingerprint|provenance|who (built|made|wrote)|what (built|made|tool)|built by|which (ai|tool|builder)|is this (a )?(lovable|bolt|v0|replit|cursor|copilot|windsurf)|(lovable|bolt\.new|v0\.dev) app)\b/.test(t))
@@ -115,6 +122,7 @@ const HELP = [
   "  • “review the architecture”            — I read the repo and assess the design at scale",
   "  • “review the function handleLogin in auth.ts”  — a focused code/function review",
   "  • “is it production ready?” / “audit”  — the full deterministic + deep audit + verdict",
+  "  • “prove it's fixed” / /certify        — I re-scan, RUN your tests, and prove each gate closed → a reproducible certificate",
   "  • “how do I scale to 1M users?”         — I survey the system + research current infra (Redis/queue/Kafka/…) and write a scale plan",
   "  • “how much will this cost?”            — I price the abuse exposure (cost-bombs in $) + the infra bill at 1M, web-grounded",
   "  • “who built this?” / /fingerprint      — I detect the AI builder (Lovable/Bolt/v0/…) and load that tool's known failure modes",
@@ -136,6 +144,7 @@ const HELP = [
 const SLASH_HELP = [
   "Slash commands — shortcuts for what I do (plain English works too):",
   "  /go-live-checks   (/audit, /ship)        — full audit (deterministic + deep + scale + cost) → go-live verdict",
+  "  /certify          (/prove, /verify)      — re-scan + RUN the tests, prove each gate closed → a reproducible certificate",
   "  /architecture-review (/arch)             — design review at scale: layering, coupling, boundaries, data flow",
   "  /security-review  (/security, /sec)      — focused security pass (authz, injection, secrets, exposure)",
   "  /review <file|function>                  — focused code/function review",
@@ -188,6 +197,8 @@ function translateSlash(raw: string): Slash {
     case "exit": case "quit": case "q": return { intent: "exit", line: raw };
     case "audit": case "go-live": case "go-live-checks": case "golive": case "ship":
       return { intent: "audit", line: raw };
+    case "certify": case "prove": case "verify": case "certificate":
+      return { intent: "certify", line: raw };
     case "scale": case "scale-plan": case "infra": case "infrastructure":
       return { intent: "scale", line: raw };
     case "infra-cost": case "infracost": case "cost": case "finops":
@@ -440,6 +451,16 @@ export async function interactive(root = "."): Promise<number> {
         if (scalePlanNote) console.log(pc.dim(scalePlanNote) + "\n");
         const verdict = goLiveVerdict(lastFindings);
         printVerdict(verdict);
+        // Track the blockers as objectives so the proof loop can later prove them
+        // closed. "Fix them, then say /certify and I'll prove each one."
+        try {
+          if (verdict.blockers.length) {
+            openObjectives(root, verdict.blockers, new Date().toISOString());
+            console.log(pc.dim(`  Tracking ${verdict.blockers.length} objective(s). Fix them, then say “/certify” and I'll prove each one closed.\n`));
+          }
+        } catch {
+          /* objectives ledger is best-effort */
+        }
         // Let Shepherd comment on the result in persona, grounded in the findings.
         const summary = lastFindings
           .slice(0, 25)
@@ -455,6 +476,43 @@ export async function interactive(root = "."): Promise<number> {
           console.log("\n" + pc.bold("🐑 Shepherd ▸ ") + reply.text + "\n");
           appendTurn(root, "shepherd", reply.text);
         }
+        continue;
+      }
+
+      if (intent === "certify") {
+        // The closed proof loop: re-scan fresh (deep, so judgment gates re-review
+        // too), run the real test suite, then prove each tracked objective closed.
+        console.log(pc.dim("\n  Proving it — re-scanning, then running your test suite (I execute tests; I never edit code) …\n"));
+        const result = await scan(root, { deep: true });
+        lastFindings = result.findings;
+        console.log(pc.dim("  Running the tests now — this runs your project's own suite …"));
+        const testResult = runTests(root);
+        if (!testResult.ran) {
+          console.log(pc.yellow(`  ⚠️  No suite ran: ${testResult.reason}.`));
+        } else {
+          console.log(
+            (testResult.passed ? pc.green("  ✓ tests green") : pc.red("  ✗ tests red")) +
+              pc.dim(`  (${testResult.command}${testResult.durationMs ? `, ${Math.round(testResult.durationMs / 1000)}s` : ""})`),
+          );
+        }
+        const cert = certify(root, { freshFindings: result.findings, testResult, probeRan: false, ts: new Date().toISOString() });
+        // colourize the card head/states by reprinting through pc where it matters.
+        printCertificate(cert);
+        let certPath = ".shepherd/certificate.md";
+        try {
+          certPath = writeCertificate(root, buildCertificateMarkdown(cert));
+        } catch {
+          /* best-effort */
+        }
+        const msg = cert.certified
+          ? `${pc.green("Shepherd-certified.")} ${cert.proven} objective(s) proven closed and the suite is green — certificate written to ${certPath.replace(/\\/g, "/")} (commit it; it's reproducible).`
+          : `${pc.yellow("Not certified yet.")} ${cert.summary} Certificate (with the open items + how to re-prove each) at ${certPath.replace(/\\/g, "/")}.` +
+            (cert.tests.ran ? "" : " Add a real test suite — say “write tests” and I'll design it.") +
+            (cert.objectives.some((o) => o.method === "empirical" && o.state === "unverifiable")
+              ? " Some need the live probe — run the full “npx shepherd” to re-prove those."
+              : "");
+        console.log("  " + msg + "\n");
+        appendTurn(root, "shepherd", cert.summary + "\n" + msg);
         continue;
       }
 

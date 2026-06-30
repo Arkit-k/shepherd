@@ -33,6 +33,7 @@ Prefer shortcuts? Type **`/`** for Claude-style slash commands — natural langu
 | Command | What it does |
 |---|---|
 | `/go-live-checks` *(`/audit`)* | Full audit — deterministic + deep review + scale + cost → go-live verdict |
+| `/certify` *(`/prove`, `/verify`)* | Re-scan + **run your tests**, prove each gate closed → a reproducible `.shepherd/certificate.md` |
 | `/architecture-review` *(`/arch`)* | Design review at scale: layering, coupling, boundaries, data flow |
 | `/security-review` *(`/sec`)* | Focused security pass (authz, injection, secrets, exposure) |
 | `/review <file\|function>` | Focused code/function review |
@@ -51,6 +52,7 @@ Prefer shortcuts? Type **`/`** for Claude-style slash commands — natural langu
 - **It knows how *AI* code fails.** The detectors target the specific failure modes of generated code — public AI/email endpoints with no rate limit, secrets in the client bundle, access control enforced only on the frontend, deprecated libraries the model still reaches for.
 - **It knows *who* built it.** Shepherd fingerprints the AI builder from structural signatures — Lovable, Bolt, v0, Replit, Cursor, Claude, Copilot, Windsurf — and loads *that tool's* known failure modes before it reviews. *"This is a Lovable app — RLS is your only access control and it's usually off; the Edge Functions have no rate limit."* A generic scanner can't make that call; the per-tool failure corpus is the moat.
 - **It's grounded, not hand-wavy.** When you ask for a review, the agent runs Shepherd's *own* deterministic detectors (via its built-in MCP server) and quotes the real findings — reviews are backed by the engine, not vibes.
+- **It proves the fix — it doesn't just claim it.** Shepherd holds your open gates as state (an objectives ledger). After your Claude Code applies the work-order, say `/certify`: Shepherd re-scans, **runs your test suite**, and flips a gate to ✅ only with fresh passing evidence. The result is a `certificate.md` where every line names the command to re-run the proof yourself — *"3 objectives proven closed, 147 tests green (`npm test`)."* A reproducible measurement is what you can trust; an opinion isn't.
 - **It thinks about *scale*, not just bugs.** Ask how to reach a million users and Shepherd becomes a principal infrastructure architect: it reads the system, finds the workload pressures (inline email, `ILIKE` search, in-memory sessions, a single DB pool), and prescribes the infrastructure to fix them — a cache, a task queue, an event stream, search, read replicas — naming current, actively-maintained open-source tools it confirms on the **live web**. A broken weekend project gets a credible road to production load.
 - **It remembers.** Across runs Shepherd keeps the project's recurring soft spots, your triage decisions ("ruled a false-positive because X"), and the tests that matter here — and recalls them before it judges, so it doesn't re-litigate what you've settled.
 - **It learns.** Recurring findings the regex can't yet catch get distilled into *candidate* rules for your review — and every scan feeds an anonymized ledger that ranks findings by real-world frequency. A code-cloner starts at zero data.
@@ -80,6 +82,29 @@ Ask *“audit”* (or run it in CI — see below) and Shepherd runs the full wal
    + 1 advisory. Estimated about a week to green.
   ════════════════════════════════════════
 ```
+
+## The certificate — proof, not opinion
+
+A go-live verdict tells you *what's wrong*. A **certificate** proves *it's actually fixed*. Shepherd tracks every blocker as an **objective**; after you apply the fixes, `/certify` (or any full `npx shepherd` run) re-checks each one against fresh evidence and **runs your real test suite as a hard gate**:
+
+```
+  ══════════════════════════════════════════════════════
+   🔏 ✅ SHEPHERD-CERTIFIED        2026-06-30
+  ══════════════════════════════════════════════════════
+   Objectives (proof of fixes):
+     ✅ Unprotected expensive/AI endpoint
+        absent on a fresh re-scan  ·  re-run: npx shepherd
+     ✅ Hardcoded http://localhost — breaks once deployed
+        absent on a fresh re-scan  ·  re-run: npx shepherd
+
+   Integration tests: ✅ 147 tests (Vitest) green · npm test
+
+   2 proven · 0 failed · 0 pending
+   Shepherd-certified — proven closed and the suite is green. Reproducible.
+  ══════════════════════════════════════════════════════
+```
+
+A gate flips to ✅ **only** when its check no longer fires on a fresh scan; the build certifies **only** when every objective is proven *and* a real suite ran green. No test suite → no certificate (you can't certify what you can't measure). Empirical gates (proven by hitting the running app) need a full `npx shepherd` run so the live probe re-fires. The certificate is written to `.shepherd/certificate.md` — commit it, link it in a PR; anyone can re-run the commands and get the same answer. That reproducibility is the trust.
 
 ## Soul & memory
 
