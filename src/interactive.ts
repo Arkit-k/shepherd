@@ -19,6 +19,7 @@ import { gitCheck, printGitCheck, installPrePushHook } from "./engine/gitcheck.j
 import { detectProvenance, buildFingerprintCard } from "./engine/provenance.js";
 import { runTests } from "./engine/testrun.js";
 import { certify, openObjectives, printCertificate, buildCertificateMarkdown, writeCertificate } from "./engine/certify.js";
+import { architectureSpec, writeArchitectureSpec } from "./engine/spec.js";
 import { ingest } from "./engine/ingest.js";
 import { designTests } from "./engine/testgen.js";
 import { printReport, type Finding } from "./engine/report.js";
@@ -75,7 +76,7 @@ function preamble(root: string): string {
   ].join("\n");
 }
 
-type Intent = "exit" | "audit" | "certify" | "scale" | "cost" | "gitcheck" | "scaffold" | "fingerprint" | "fix" | "tests" | "learn" | "evolve" | "triage" | "help" | "chat";
+type Intent = "exit" | "audit" | "certify" | "design" | "scale" | "cost" | "gitcheck" | "scaffold" | "fingerprint" | "fix" | "tests" | "learn" | "evolve" | "triage" | "help" | "chat";
 
 function intentOf(s: string): Intent {
   const t = s.trim().toLowerCase();
@@ -85,6 +86,11 @@ function intentOf(s: string): Intent {
   // fixed" / "certify this" isn't read as a plain audit or test-design request.
   if (/\b(certif(y|ied|icate)|prove it|prove the fix|verify the fix|is it (actually )?fixed|re[- ]?verify|proof|are the gates? (closed|fixed)|sign off|shepherd[- ]?certif)\b/.test(t))
     return "certify";
+  // SPEC-FIRST design — author the architecture blueprint to BUILD from (forward-
+  // looking), distinct from "review the architecture" (diagnostic). Requires a
+  // design/spec/blueprint verb so "design the tests" still routes to tests.
+  if (/\b(architecture spec|arch spec|design spec|blueprint|spec[- ]?first|design (the |my |our )?(architecture|system|app|backend|service)|how (should|do) i (build|architect|structure)|build it right|greenfield)\b/.test(t))
+    return "design";
   // AI-provenance fingerprint — which builder made this repo. Checked early so a
   // tool name ("is this a lovable app?") isn't swallowed by another intent.
   if (/\b(fingerprint|provenance|who (built|made|wrote)|what (built|made|tool)|built by|which (ai|tool|builder)|is this (a )?(lovable|bolt|v0|replit|cursor|copilot|windsurf)|(lovable|bolt\.new|v0\.dev) app)\b/.test(t))
@@ -120,6 +126,7 @@ function intentOf(s: string): Intent {
 const HELP = [
   "I'm an agent — just talk to me. Things you can ask:",
   "  • “review the architecture”            — I read the repo and assess the design at scale",
+  "  • “design the architecture” / /design   — I author the BLUEPRINT to build from (target pattern, boundaries, design patterns, principles, infra plan)",
   "  • “review the function handleLogin in auth.ts”  — a focused code/function review",
   "  • “is it production ready?” / “audit”  — the full deterministic + deep audit + verdict",
   "  • “prove it's fixed” / /certify        — I re-scan, RUN your tests, and prove each gate closed → a reproducible certificate",
@@ -145,7 +152,8 @@ const SLASH_HELP = [
   "Slash commands — shortcuts for what I do (plain English works too):",
   "  /go-live-checks   (/audit, /ship)        — full audit (deterministic + deep + scale + cost) → go-live verdict",
   "  /certify          (/prove, /verify)      — re-scan + RUN the tests, prove each gate closed → a reproducible certificate",
-  "  /architecture-review (/arch)             — design review at scale: layering, coupling, boundaries, data flow",
+  "  /architecture-review (/arch)             — design review at scale: layering, coupling, boundaries, data flow (diagnostic)",
+  "  /design           (/spec, /blueprint)    — author the architecture BLUEPRINT to build from (prescriptive): target pattern, boundaries, patterns, principles, infra",
   "  /security-review  (/security, /sec)      — focused security pass (authz, injection, secrets, exposure)",
   "  /review <file|function>                  — focused code/function review",
   "  /scale            (/scale-plan, /infra)  — infra roadmap to ~1M users + a written scale plan",
@@ -199,6 +207,8 @@ function translateSlash(raw: string): Slash {
       return { intent: "audit", line: raw };
     case "certify": case "prove": case "verify": case "certificate":
       return { intent: "certify", line: raw };
+    case "design": case "spec": case "blueprint": case "design-spec":
+      return { intent: "design", line: raw };
     case "scale": case "scale-plan": case "infra": case "infrastructure":
       return { intent: "scale", line: raw };
     case "infra-cost": case "infracost": case "cost": case "finops":
@@ -476,6 +486,32 @@ export async function interactive(root = "."): Promise<number> {
           console.log("\n" + pc.bold("🐑 Shepherd ▸ ") + reply.text + "\n");
           appendTurn(root, "shepherd", reply.text);
         }
+        continue;
+      }
+
+      if (intent === "design") {
+        // SPEC-FIRST: author the architecture blueprint to BUILD from. Composes the
+        // deterministic classifiers (skeleton + principles) and, with Claude, a
+        // web-grounded blueprint narrative for this app + the infra plan.
+        console.log(pc.dim("\n  Authoring the architecture spec — target pattern, boundaries, design patterns, principles, infra plan …\n"));
+        const repo = await ingest(root);
+        const spec = architectureSpec(repo, { web: true });
+        console.log(pc.bold(`  🏗  Target: ${spec.targetPattern}`));
+        console.log("   " + spec.rationale + "\n");
+        console.log(pc.dim(`  Structure: ${spec.inputs.structure}-based today · pattern(s): ${spec.inputs.patterns.join(", ")}`));
+        if (spec.prescriptions.length) {
+          const now = spec.prescriptions.filter((p) => p.priority === "now").length;
+          console.log(pc.dim(`  Infra to build in: ${spec.prescriptions.length} component(s)${now ? `, ${now} from the start` : ""}`));
+        }
+        if (spec.blueprint.length) console.log(pc.dim(`  Blueprint: ${spec.blueprint.length} section(s) authored for this app`));
+        const specPath = writeArchitectureSpec(root, spec.markdown);
+        const msg =
+          `\n  Wrote the architecture spec to ${specPath.replace(/\\/g, "/")}. ` +
+          `I designed it; you build from it — hand it to your Claude Code session ` +
+          `(“scaffold the architecture in ${specPath.replace(/\\/g, "/")}”, or build one feature module at a time). ` +
+          `When a slice is built, say “/certify” and I'll prove it matches.`;
+        console.log(pc.dim(msg) + "\n");
+        appendTurn(root, "shepherd", `Architecture spec → ${spec.targetPattern}.` + msg);
         continue;
       }
 

@@ -78,7 +78,10 @@ function composeServiceCount(root: string): number {
   return 0;
 }
 
-export function analyzeArchitecture(repo: Repo): ArchitectureResult {
+// The cheap, DETERMINISTIC classification only (no Claude). Used by the forward-
+// looking architecture spec, which wants the shape/comms but not the diagnostic
+// review of existing code.
+export function classifyShape(repo: Repo): { shape: BackendShape; comms: string[] } {
   const deps = allDeps(repo.root);
   const comms = [...new Set(Object.keys(COMMS).filter((k) => k in deps).map((k) => COMMS[k]))];
 
@@ -91,6 +94,12 @@ export function analyzeArchitecture(repo: Repo): ArchitectureResult {
   else if (serverless) shape = "serverless";
   else if (Object.keys(deps).some((d) => ["express", "fastify", "@nestjs/core", "hono", "koa"].includes(d)))
     shape = "monolith";
+
+  return { shape, comms };
+}
+
+export function analyzeArchitecture(repo: Repo): ArchitectureResult {
+  const { shape, comms } = classifyShape(repo);
 
   const findings: Finding[] = [];
   const claudeReview = reviewCommunication(repo, shape, comms);

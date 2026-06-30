@@ -172,10 +172,15 @@ function productionReadiness(repo: Repo, patterns: string[], inv: InfraInventory
     }));
 }
 
-export function analyzeProduction(repo: Repo): PatternResult {
+// The cheap, DETERMINISTIC classification only (no Claude) — the detected
+// pattern(s) + the infra actually present. Used by the forward-looking spec.
+export function classifyProduction(repo: Repo): { patterns: string[]; infra: InfraInventory } {
   const deps = allDeps(repo.root);
-  const patterns = detectPatterns(repo, deps);
-  const infra = takeInventory(repo, deps);
+  return { patterns: detectPatterns(repo, deps), infra: takeInventory(repo, deps) };
+}
+
+export function analyzeProduction(repo: Repo): PatternResult {
+  const { patterns, infra } = classifyProduction(repo);
   const findings = productionReadiness(repo, patterns, infra);
   return { patterns, infra, findings };
 }
