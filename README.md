@@ -71,7 +71,7 @@ Ask *“audit”* (or run it in CI — see below) and Shepherd runs the full wal
 1. **Survey** — what is this app, how is it built, how is it organized (layer-folders vs feature-slices).
 2. **Modernity** — outdated deps, deprecated patterns, and old-but-works idioms where a newer/safer primitive exists (form `fetch` → Server Actions, class components → hooks, `moment` → date-fns).
 3. **Audit** — security, performance, architecture, and logic, split into **gates** (block the merge) and **advice**, plus design-pattern trade-offs judged *as per this project's* scale, and a DevOps / infra-as-code review (GitHub Actions, nginx, Jenkins, Terraform/CFN/Bicep, compose).
-4. **Backend & production-readiness** — detects the real pattern (event-driven, task-queue, CQRS, hexagonal…), reasons like a principal engineer about required-but-missing infra at 1M, researches current best practice on the live web (with source URLs), runs a bounded **live attack probe** on localhost (proves the cost-bomb, auth bypass, header/stack-trace leaks), checks **operations & observability**, and — if Docker's present — a bounded **load test** that projects honestly toward the target.
+4. **Backend & production-readiness** — detects the real pattern (event-driven, task-queue, CQRS, hexagonal…), reasons like a principal engineer about required-but-missing infra at 1M, researches current best practice on the live web (with source URLs), runs a bounded **live attack probe** on localhost — a small red team that *proves* the exploit: the cost-bomb (rate-limit drain), broken access control (IDOR), SQL injection, reflected XSS, `alg:none` JWT bypass, prompt injection on LLM endpoints, and stack-trace leaks — plus a **blue check** of whether the app actually detected/rejected the hostile input, checks **operations & observability**, and — if Docker's present — a bounded **load test** that projects honestly toward the target.
 5. **Scale architect** — a whole-system, web-grounded pass that prescribes the *infrastructure* to carry the app to ~1M users (cache, task queue, event stream, search, read replicas, connection pool, rate limiter…), names current open-source tools with source URLs, and writes a `.shepherd/scale-plan.md` you can work through one change at a time.
 6. **Go-Live Gate** — collapses everything into distinct, ordered blockers and gives one verdict: **Ship / Not-ready**, with a rough effort-to-green.
 7. **Hand-off** — writes the blockers into `.shepherd/fix-order.md` for your Claude Code session to apply. Shepherd never edits your code.
@@ -172,9 +172,11 @@ npx shepherd .          # non-interactive → full audit + hand-off, fails the b
 
 Shepherd finds the problems and writes the prompt; your Claude Code session does the editing, so you stay in control. Just ask Shepherd to *“write the fix work-order”* (or *“write the tests”*, or *“how do I scale to 1M?”*), then in your session say *“apply the fixes in `.shepherd/fix-order.md`”* — or work through `.shepherd/scale-plan.md` one infrastructure change at a time. If Shepherd's MCP server is wired into your session, it can also push the order to you automatically (Channels, research preview).
 
-## Safety of the live probe
+## Safety of the live probe (red + blue)
 
-The attack stage hits **localhost only**, against a server Shepherd itself starts, with hard request caps and per-request timeouts — bounded testing of your own app, never an external target, never unbounded. The server is always shut down afterward; if it can't boot, the probe is skipped and the run continues.
+Shepherd doesn't just *infer* vulnerabilities from source — it boots your app and **proves** them. A small **red team** fires the exploit classes AI code actually ships broken (rate-limit drain, IDOR, SQL injection, reflected XSS, `alg:none` JWT bypass, prompt injection, stack-trace leakage), and a **blue check** then asks the defensive question: of all those hostile requests, how many did the app actually *reject* (4xx) versus silently accept (2xx) or crash on (5xx)? Low rejection = no input validation or detection at the edge.
+
+Every probe hits **localhost only**, against a server Shepherd itself starts, with hard request caps and per-request timeouts — authorized testing of *your own* app, never an external target, never unbounded. The server is always shut down afterward; if it can't boot, the probe is skipped and the run continues. (This is the empirical half of `/certify` — a proven exploit is a gate, and re-running the probe is what proves it closed.)
 
 ## Install
 
