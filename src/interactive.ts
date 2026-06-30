@@ -35,6 +35,7 @@ import { triageFromText } from "./engine/memory/triage-parse.js";
 import { readTestLog } from "./engine/memory/tests-log.js";
 import { recordScan } from "./engine/ledger.js";
 import { annotate, prevalenceNote, insightsCard } from "./engine/insights.js";
+import { devopsBlueprint, writeDevopsOrder } from "./engine/devops-scaffold.js";
 
 // Shepherd is an AGENT, not a set of programs. You start it and you talk to it.
 // It boots as a 200-year-old principal engineer (soul.md), already holding this
@@ -84,11 +85,15 @@ function preamble(root: string): string {
   ].join("\n");
 }
 
-type Intent = "exit" | "audit" | "autopilot" | "certify" | "release" | "design" | "rightsize" | "insights" | "scale" | "cost" | "gitcheck" | "scaffold" | "fingerprint" | "fix" | "tests" | "learn" | "evolve" | "triage" | "help" | "chat";
+type Intent = "exit" | "audit" | "autopilot" | "certify" | "release" | "design" | "rightsize" | "insights" | "devops" | "scale" | "cost" | "gitcheck" | "scaffold" | "fingerprint" | "fix" | "tests" | "learn" | "evolve" | "triage" | "help" | "chat";
 
 function intentOf(s: string): Intent {
   const t = s.trim().toLowerCase();
   if (/^(exit|quit|bye|:q|q)$/.test(t)) return "exit";
+  // DevOps scaffolder — generate the actual infra deck (CI/CD, Docker, proxy, k8s,
+  // observability). Before scale so "set up docker/k8s/ci" isn't read as "scale".
+  if (/\b(devops|ci[ /-]?cd|cicd|dockeri[sz]e|container(ize|ise)|kubernetes|k8s|kube|nginx|caddy|reverse proxy|prometheus|grafana|observability stack|helm chart|infra(structure)? (setup|files?|config|manifests?)|set ?up (the )?(devops|docker|k8s|kubernetes|ci|pipeline|nginx|caddy|monitoring)|generate (the )?(docker|k8s|ci|pipeline|nginx))\b/.test(t))
+    return "devops";
   // Insights — the data flywheel: which findings are most common across the repos
   // you've scanned. Checked early so "what's most common" isn't read as something else.
   if (/\b(insights?|stats|statistics|ledger|trends?|most common|how common|prevalence|leaderboard|what (do|does) .*(usually|commonly) (break|fail))\b/.test(t))
@@ -154,6 +159,7 @@ const HELP = [
   "  • “design the architecture” / /design   — I author the BLUEPRINT to build from (target pattern, boundaries, design patterns, principles, infra plan)",
   "  • “am I over-engineering?” / /rightsize  — the YAGNI counterweight: I flag abstractions/infra you don't need yet (high- and low-level)",
   "  • “what's most common?” / /insights      — the data flywheel: which findings recur most across the repos you've scanned (gets sharper every run)",
+  "  • “set up devops” / /devops              — I generate the infra deck (CI/CD, Husky, Docker, Caddy/nginx, k8s, Prometheus/Grafana), right-sized to your scale",
   "  • “review the function handleLogin in auth.ts”  — a focused code/function review",
   "  • “run the whole loop” / /autopilot    — I ASK what you want (scale, architecture, infra, deploy), then run design → right-size → certify → release",
   "  • “is it production ready?” / “audit”  — the full deterministic + deep audit + verdict",
@@ -192,6 +198,7 @@ const SLASH_HELP = [
   "  /scale            (/scale-plan, /infra)  — infra roadmap to ~1M users + a written scale plan",
   "  /infra-cost       (/cost, /finops)       — $ abuse exposure (cost-bombs) + infra bill at 1M, web-grounded",
   "  /git-check        (/git-check install)   — review what you're about to push (verdict); 'install' wires a pre-push hook",
+  "  /devops           (/cicd, /infra-setup)  — generate the infra deck (CI/CD, Husky, Docker, Caddy/nginx, k8s, Prometheus/Grafana), right-sized to your scale",
   "  /scaffold         (/hygiene, /tooling)   — find missing prod-grade files (Husky, linter, formatter, license…) + a work-order",
   "  /fingerprint      (/provenance, /built-by) — detect the AI builder (Lovable/Bolt/v0/Replit/…) + that tool's known failure modes",
   "  /tests <target>   (/test)                — design the essential tests + a work-order",
@@ -242,6 +249,8 @@ function translateSlash(raw: string): Slash {
       return { intent: "autopilot", line: raw };
     case "insights": case "stats": case "ledger": case "trends": case "trend":
       return { intent: "insights", line: raw };
+    case "devops": case "cicd": case "ci-cd": case "infra-setup": case "k8s": case "docker": case "scaffold-infra":
+      return { intent: "devops", line: raw };
     case "certify": case "prove": case "verify": case "certificate":
       return { intent: "certify", line: raw };
     case "release-check": case "release": case "ship-it": case "shipit": case "deploy-check": case "deploy":
@@ -903,6 +912,29 @@ export async function interactive(root = "."): Promise<number> {
           appendTurn(root, "shepherd", msg);
           if (!v.ready) console.log(pc.dim("  " + msg) + "\n");
         }
+        continue;
+      }
+
+      if (intent === "devops") {
+        const repo = await ingest(root);
+        const bp = devopsBlueprint(repo, {});
+        console.log(pc.bold(`\n  🛠  DevOps deck — right-sized for ${pc.bold(bp.scale)} scale:\n`));
+        for (const inc of bp.included) console.log(`   • ${inc}`);
+        if (bp.scale !== "large") {
+          console.log(
+            pc.dim(
+              `\n  (Held back Kubernetes + Prometheus/Grafana — that's ops weight you don't need at ${bp.scale} scale. ` +
+                `Run “/autopilot” and pick ~1M, or set scale in .shepherd/intent.json, to get the full deck.)`,
+            ),
+          );
+        }
+        const orderPath = writeDevopsOrder(root, bp.markdown);
+        const msg =
+          `\n  Wrote a DevOps work-order to ${orderPath.replace(/\\/g, "/")} with ready-to-adapt config (real YAML/Dockerfile/proxy, ` +
+          `tailored to your stack + selected infra + deploy target). I describe it; you drop the files in — ` +
+          `or tell your Claude Code session “create the files in ${orderPath.replace(/\\/g, "/")}”. These close the security-header + rate-limit findings the probe raises.`;
+        console.log(pc.dim(msg) + "\n");
+        appendTurn(root, "shepherd", msg);
         continue;
       }
 
