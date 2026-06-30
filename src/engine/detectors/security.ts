@@ -3,11 +3,15 @@ import type { Finding } from "../report.js";
 
 // Layer 2, family 1 — deterministic security/pattern detectors (no LLM).
 
-const SECRET_PATTERNS: RegExp[] = [
-  /service_role/,
-  /\bsk-[A-Za-z0-9]{20,}\b/,
-  /AKIA[0-9A-Z]{16}/,
-  /(OPENAI|ANTHROPIC|SUPABASE_SERVICE)[A-Z_]*\s*=\s*['"][A-Za-z0-9_\-]{16,}['"]/,
+// Match the actual hardcoded SECRET VALUE, not just a keyword — `service_role`
+// alone reads as a false positive on any code that merely mentions Supabase (or, as
+// dogfooding caught, on this detector's own pattern source). A leaked service_role
+// key IS a JWT, so we match the JWT shape instead.
+const SECRET_PATTERNS: { re: RegExp; label: string }[] = [
+  { re: /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/, label: "a hardcoded JWT (e.g. a Supabase service_role/anon key or an auth token)" },
+  { re: /\bsk-[A-Za-z0-9]{20,}\b/, label: "an OpenAI-style secret key (sk-…)" },
+  { re: /AKIA[0-9A-Z]{16}/, label: "an AWS access key id (AKIA…)" },
+  { re: /(OPENAI|ANTHROPIC|SUPABASE_SERVICE)[A-Z_]*\s*=\s*['"][A-Za-z0-9_\-]{16,}['"]/, label: "a hardcoded API key assignment" },
 ];
 
 const AI_EMAIL_CALL =
@@ -50,7 +54,7 @@ export function security(repo: Repo): Finding[] {
     }
 
     // 2. 🔴 hardcoded secret in source
-    for (const re of SECRET_PATTERNS) {
+    for (const { re, label } of SECRET_PATTERNS) {
       if (/\.example$/.test(f.path)) break;
       const m = f.content.match(re);
       if (m) {
@@ -60,7 +64,7 @@ export function security(repo: Repo): Finding[] {
           disposition: "gate",
           file: f.path,
           line: lineOf(f.content, m.index ?? 0),
-          message: `Possible hardcoded secret (/${re.source}/) — move it to an env var and rotate it.`,
+          message: `Possible hardcoded secret — ${label}. Move it to an env var and rotate it.`,
         });
         break; // one per file is enough
       }
