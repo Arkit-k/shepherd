@@ -1,0 +1,27 @@
+# GitHub App manifest for Shepherd. Use it to create the App in one flow:
+# visit https://github.com/settings/apps/new?manifest from a tiny page that POSTs
+# this manifest (see src/app/README.md), or just mirror these settings manually.
+#
+# Replace YOUR-DEPLOYMENT with your public server URL before registering.
+
+name: Shepherd Go-Live Gate
+description: >-
+  Production-readiness gate for AI-written code. Reviews every pull request with
+  Shepherd's deterministic engine and posts a go-live verdict (Check Run + summary).
+url: https://github.com/Arkit-k/shepherd
+public: false
+
+# where GitHub delivers webhooks
+hook_attributes:
+  url: https://YOUR-DEPLOYMENT/api/github/webhooks
+  active: true
+
+# least privilege: read code, write the check + the summary comment
+default_permissions:
+  checks: write
+  pull_requests: write
+  contents: read
+
+# we only need pull requests
+default_events:
+  - pull_request

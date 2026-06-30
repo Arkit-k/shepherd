@@ -65,7 +65,7 @@ Prefer shortcuts? Type **`/`** for Claude-style slash commands — natural langu
 - **It thinks about *scale*, not just bugs.** Ask how to reach a million users and Shepherd becomes a principal infrastructure architect: it reads the system, finds the workload pressures (inline email, `ILIKE` search, in-memory sessions, a single DB pool), and prescribes the infrastructure to fix them — a cache, a task queue, an event stream, search, read replicas — naming current, actively-maintained open-source tools it confirms on the **live web**. A broken weekend project gets a credible road to production load.
 - **It remembers.** Across runs Shepherd keeps the project's recurring soft spots, your triage decisions ("ruled a false-positive because X"), and the tests that matter here — and recalls them before it judges, so it doesn't re-litigate what you've settled.
 - **It learns, and it compounds.** Recurring findings the regex can't yet catch get distilled into *candidate* rules for your review. And every scan feeds a local ledger that ranks findings by **real-world frequency** — which flows *back into reviews*: a common failure is tagged inline (*"📊 seen in 75% of the repos you've scanned — #1 most common"*), and `/insights` shows the full leaderboard. The more you (and your team) scan, the sharper Shepherd's priorities get. A code-cloner starts at zero data and can't catch up.
-- **One engine, two shells.** The same engine runs in the **CLI agent** (on *your* Claude Code — free) and, soon, as a **GitHub App** (server-side, on our API — paid). Same checks everywhere.
+- **One engine, two shells.** The same engine runs in the **CLI agent** (on *your* Claude Code — free, full depth) **and as a GitHub App** that gates every pull request server-side with the deterministic detectors (no LLM, ~$0/PR) — a Check Run + a go-live summary comment, with the deep review staying on your own account. Same checks everywhere. See [`src/app/`](src/app/README.md).
 
 ## What it does on an audit
 
@@ -191,7 +191,7 @@ Requires Node 18+. The conversation and deep reviews use [Claude Code](https://c
 
 ## Status
 
-The engine is built and verified end-to-end on real AI-built repos, and the agent interface + memory loop (soul, grounded reviews, conversational triage, test generation, living profile, rule self-evolution) are in. See [`ROADMAP.md`](ROADMAP.md) for what's next (the GitHub App).
+The engine is built and verified end-to-end on real AI-built repos; the agent interface + memory loop (soul, grounded reviews, conversational triage, test generation, living profile, rule self-evolution) are in; and the **GitHub App** (server-side PR gate, free deterministic tier) is built — register + deploy per [`src/app/README.md`](src/app/README.md). See [`ROADMAP.md`](ROADMAP.md) for the rest.
 
 ## License
 
