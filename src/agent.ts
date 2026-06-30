@@ -24,6 +24,7 @@ import { analyzeArchitecture } from "./engine/backend/architecture.js";
 import { analyzeProduction } from "./engine/backend/production.js";
 import { researchProduction } from "./engine/research.js";
 import { scaleAndResilience } from "./engine/backend/scale.js";
+import { rightSizing } from "./engine/rightsizing.js";
 import { frontendScale } from "./engine/frontend/scale.js";
 import { liveProbe } from "./engine/backend/probe.js";
 import { loadTest } from "./engine/backend/loadtest.js";
@@ -188,6 +189,8 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
 
   const scaleFindings = scaleAndResilience(repo, { deep: hasClaude });
   const feFindings = frontendScale(repo, { deep: hasClaude });
+  // the YAGNI counterweight — over-engineering judgment (knowing when to STOP).
+  const rightSizeFindings = rightSizing(repo, { deep: hasClaude });
   const live = await liveProbe(repo);
   const liveProbeRan = live.length > 0 || true; // attempted; probe logs if skipped
 
@@ -222,6 +225,7 @@ export async function runAgent(root = ".", _opts: AgentOptions = {}): Promise<nu
       ...opsFindings,
       ...scaleFindings,
       ...feFindings,
+      ...rightSizeFindings,
       ...live,
       ...loadFindings,
     ]),

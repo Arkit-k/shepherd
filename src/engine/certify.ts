@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { loadProject } from "./project.js";
 import type { Finding } from "./report.js";
@@ -144,6 +145,42 @@ export interface Certificate {
   pending: number;
   summary: string;
   ts: string;
+  commit?: string; // the git HEAD this certificate attests to (ties cert → deploy)
+}
+
+// The git commit the certificate attests to — so a release gate can confirm what
+// you're deploying is exactly what was proven.
+function gitHead(root: string): string | undefined {
+  try {
+    const res = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", shell: process.platform === "win32" });
+    if (res.status === 0 && res.stdout) return res.stdout.trim();
+  } catch {
+    /* not a git repo — fine */
+  }
+  return undefined;
+}
+
+// A small machine-readable sidecar so the release gate can read the verdict
+// without re-parsing the markdown.
+export interface CertRecord {
+  certified: boolean;
+  commit?: string;
+  ts: string;
+  proven: number;
+  failed: number;
+  pending: number;
+  testsRan: boolean;
+  testsPassed: boolean;
+}
+
+export function readCertRecord(root: string): CertRecord | null {
+  const p = path.join(loadProject(root).dir, "certificate.json");
+  if (!existsSync(p)) return null;
+  try {
+    return JSON.parse(readFileSync(p, "utf8")) as CertRecord;
+  } catch {
+    return null;
+  }
 }
 
 // Verify the open objectives against fresh evidence and produce the certificate.
@@ -216,7 +253,26 @@ export function certify(root: string, input: CertifyInput): Certificate {
     summary = `Not certified — ${reasons.join("; ")}.`;
   }
 
-  return { certified, objectives, tests: testResult, proven, failed, pending, summary, ts };
+  const commit = gitHead(root);
+
+  // write the machine-readable sidecar so the release gate can read the verdict.
+  try {
+    const record: CertRecord = {
+      certified,
+      commit,
+      ts,
+      proven,
+      failed,
+      pending,
+      testsRan: testResult.ran,
+      testsPassed: testResult.ran && testResult.passed,
+    };
+    writeFileSync(path.join(loadProject(root).dir, "certificate.json"), JSON.stringify(record, null, 2) + "\n");
+  } catch {
+    /* sidecar is best-effort */
+  }
+
+  return { certified, objectives, tests: testResult, proven, failed, pending, summary, ts, commit };
 }
 
 const STATE_ICON: Record<ObjectiveState, string> = { passed: "✅", failed: "❌", open: "⏳", unverifiable: "⏳" };
@@ -259,7 +315,7 @@ export function buildCertificateMarkdown(c: Certificate): string {
   const lines: string[] = [
     `# Shepherd certificate`,
     ``,
-    `**${head}** — _${c.ts}_`,
+    `**${head}** — _${c.ts}_${c.commit ? ` · commit \`${c.commit.slice(0, 7)}\`` : ""}`,
     ``,
     c.summary,
     ``,

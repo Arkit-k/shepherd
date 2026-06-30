@@ -20,6 +20,8 @@ import { detectProvenance, buildFingerprintCard } from "./engine/provenance.js";
 import { runTests } from "./engine/testrun.js";
 import { certify, openObjectives, printCertificate, buildCertificateMarkdown, writeCertificate } from "./engine/certify.js";
 import { architectureSpec, writeArchitectureSpec } from "./engine/spec.js";
+import { rightSizing } from "./engine/rightsizing.js";
+import { releaseReadiness, printReleaseReadiness, buildDeployOrder, writeDeployOrder, checkDeployedHealth } from "./engine/release.js";
 import { ingest } from "./engine/ingest.js";
 import { designTests } from "./engine/testgen.js";
 import { printReport, type Finding } from "./engine/report.js";
@@ -76,7 +78,7 @@ function preamble(root: string): string {
   ].join("\n");
 }
 
-type Intent = "exit" | "audit" | "certify" | "design" | "scale" | "cost" | "gitcheck" | "scaffold" | "fingerprint" | "fix" | "tests" | "learn" | "evolve" | "triage" | "help" | "chat";
+type Intent = "exit" | "audit" | "certify" | "release" | "design" | "rightsize" | "scale" | "cost" | "gitcheck" | "scaffold" | "fingerprint" | "fix" | "tests" | "learn" | "evolve" | "triage" | "help" | "chat";
 
 function intentOf(s: string): Intent {
   const t = s.trim().toLowerCase();
@@ -86,11 +88,19 @@ function intentOf(s: string): Intent {
   // fixed" / "certify this" isn't read as a plain audit or test-design request.
   if (/\b(certif(y|ied|icate)|prove it|prove the fix|verify the fix|is it (actually )?fixed|re[- ]?verify|proof|are the gates? (closed|fixed)|sign off|shepherd[- ]?certif)\b/.test(t))
     return "certify";
+  // Release gate — clear-to-deploy check (cert fresh + matches HEAD + clean).
+  // Before audit so "ship it"/"deploy" routes here, not to a full audit.
+  if (/\b(release|deploy|ship it|cut a release|go to prod(uction)?|pre[- ]?deploy|ready to (deploy|ship)|clear to (deploy|ship)|release gate|deploy gate)\b/.test(t))
+    return "release";
   // SPEC-FIRST design — author the architecture blueprint to BUILD from (forward-
   // looking), distinct from "review the architecture" (diagnostic). Requires a
   // design/spec/blueprint verb so "design the tests" still routes to tests.
   if (/\b(architecture spec|arch spec|design spec|blueprint|spec[- ]?first|design (the |my |our )?(architecture|system|app|backend|service)|how (should|do) i (build|architect|structure)|build it right|greenfield)\b/.test(t))
     return "design";
+  // Right-sizing / YAGNI — the over-engineering counterweight. "Am I over-
+  // engineering?", "is this too complex?", "do I really need this abstraction?"
+  if (/\b(over[- ]?engineer\w*|right[- ]?siz\w*|yagni|too (complex|abstract|much abstraction)|premature (optimi|abstraction)|unnecessary abstraction|over[- ]?abstract|gold[- ]?plat|am i over|do i (really |actually )?need (this|a|an|the)|simpler version)\b/.test(t))
+    return "rightsize";
   // AI-provenance fingerprint — which builder made this repo. Checked early so a
   // tool name ("is this a lovable app?") isn't swallowed by another intent.
   if (/\b(fingerprint|provenance|who (built|made|wrote)|what (built|made|tool)|built by|which (ai|tool|builder)|is this (a )?(lovable|bolt|v0|replit|cursor|copilot|windsurf)|(lovable|bolt\.new|v0\.dev) app)\b/.test(t))
@@ -127,9 +137,11 @@ const HELP = [
   "I'm an agent — just talk to me. Things you can ask:",
   "  • “review the architecture”            — I read the repo and assess the design at scale",
   "  • “design the architecture” / /design   — I author the BLUEPRINT to build from (target pattern, boundaries, design patterns, principles, infra plan)",
+  "  • “am I over-engineering?” / /rightsize  — the YAGNI counterweight: I flag abstractions/infra you don't need yet (high- and low-level)",
   "  • “review the function handleLogin in auth.ts”  — a focused code/function review",
   "  • “is it production ready?” / “audit”  — the full deterministic + deep audit + verdict",
   "  • “prove it's fixed” / /certify        — I re-scan, RUN your tests, and prove each gate closed → a reproducible certificate",
+  "  • “clear to deploy?” / /release-check   — the release gate: ship only a proven build (cert is fresh + matches HEAD + clean); writes a gated CI/CD pipeline; checks a live URL's health",
   "  • “how do I scale to 1M users?”         — I survey the system + research current infra (Redis/queue/Kafka/…) and write a scale plan",
   "  • “how much will this cost?”            — I price the abuse exposure (cost-bombs in $) + the infra bill at 1M, web-grounded",
   "  • “who built this?” / /fingerprint      — I detect the AI builder (Lovable/Bolt/v0/…) and load that tool's known failure modes",
@@ -152,8 +164,10 @@ const SLASH_HELP = [
   "Slash commands — shortcuts for what I do (plain English works too):",
   "  /go-live-checks   (/audit, /ship)        — full audit (deterministic + deep + scale + cost) → go-live verdict",
   "  /certify          (/prove, /verify)      — re-scan + RUN the tests, prove each gate closed → a reproducible certificate",
+  "  /release-check    (/ship-it, /deploy)    — release gate: deploy only a PROVEN build; “pipeline” writes a gated CI/CD work-order; “<url>” health-checks a deploy",
   "  /architecture-review (/arch)             — design review at scale: layering, coupling, boundaries, data flow (diagnostic)",
   "  /design           (/spec, /blueprint)    — author the architecture BLUEPRINT to build from (prescriptive): target pattern, boundaries, patterns, principles, infra",
+  "  /rightsize        (/yagni, /simplify)    — the YAGNI counterweight: flag over-engineering you don't need yet (premature infra, single-impl interfaces, …)",
   "  /security-review  (/security, /sec)      — focused security pass (authz, injection, secrets, exposure)",
   "  /review <file|function>                  — focused code/function review",
   "  /scale            (/scale-plan, /infra)  — infra roadmap to ~1M users + a written scale plan",
@@ -207,8 +221,12 @@ function translateSlash(raw: string): Slash {
       return { intent: "audit", line: raw };
     case "certify": case "prove": case "verify": case "certificate":
       return { intent: "certify", line: raw };
+    case "release-check": case "release": case "ship-it": case "shipit": case "deploy-check": case "deploy":
+      return { intent: "release", line: arg || raw };
     case "design": case "spec": case "blueprint": case "design-spec":
       return { intent: "design", line: raw };
+    case "rightsize": case "right-size": case "yagni": case "overengineering": case "over-engineering": case "simplify":
+      return { intent: "rightsize", line: raw };
     case "scale": case "scale-plan": case "infra": case "infrastructure":
       return { intent: "scale", line: raw };
     case "infra-cost": case "infracost": case "cost": case "finops":
@@ -515,6 +533,42 @@ export async function interactive(root = "."): Promise<number> {
         continue;
       }
 
+      if (intent === "rightsize") {
+        // The YAGNI counterweight — knowing when to STOP optimizing.
+        console.log(pc.dim("\n  Right-sizing — looking for what's over-engineered (abstractions for problems you don't have yet) …\n"));
+        const repo = await ingest(root);
+        const items = rightSizing(repo, { deep: true });
+        if (items.length === 0) {
+          const msg = "Nothing over-engineered that I can see — the complexity here looks earned. Right-sized.";
+          console.log("  " + pc.green(msg) + "\n");
+          appendTurn(root, "shepherd", msg);
+          continue;
+        }
+        const high = items.filter((f) => /infra|microservice|layering/.test(f.id));
+        const low = items.filter((f) => !/infra|microservice|layering/.test(f.id));
+        const show = (label: string, fs: Finding[]) => {
+          if (!fs.length) return;
+          console.log(pc.bold(`  ${label}`));
+          for (const f of fs) {
+            const dot = f.severity === "warn" ? "🟡" : "🔵";
+            console.log(`   ${dot} ${pc.dim(f.line ? `${f.file}:${f.line}` : f.file)} ${pc.dim(`(${f.id})`)}`);
+            console.log(`      ${f.message}`);
+          }
+          console.log("");
+        };
+        show("High-level (architecture / infra)", high);
+        show("Low-level (code abstractions)", low);
+        // fold into the session so a follow-up can act on them.
+        const ids = new Set(lastFindings.map((f) => f.id + f.file));
+        lastFindings = [...lastFindings, ...items.filter((f) => !ids.has(f.id + f.file))];
+        const msg =
+          `${items.length} thing(s) that may be solving a problem you don't have yet — all advisory (over-engineering is complexity-debt, not a blocker). ` +
+          `The call is yours: keep it only if the workload in front of you needs it. The skill is knowing when to stop.`;
+        console.log(pc.dim("  " + msg) + "\n");
+        appendTurn(root, "shepherd", msg);
+        continue;
+      }
+
       if (intent === "certify") {
         // The closed proof loop: re-scan fresh (deep, so judgment gates re-review
         // too), run the real test suite, then prove each tracked objective closed.
@@ -549,6 +603,45 @@ export async function interactive(root = "."): Promise<number> {
               : "");
         console.log("  " + msg + "\n");
         appendTurn(root, "shepherd", cert.summary + "\n" + msg);
+        continue;
+      }
+
+      if (intent === "release") {
+        // A URL arg → post-deploy health check; "pipeline" → write the CI work-order;
+        // otherwise the release gate (is the build proven + matches HEAD + clean?).
+        if (/^https?:\/\//i.test(line.trim())) {
+          const url = line.trim();
+          console.log(pc.dim(`\n  Checking the deployed app at ${url} …`));
+          const h = await checkDeployedHealth(url);
+          console.log((h.ok ? pc.green(`  🟢 healthy — ${h.detail}`) : pc.red(`  🔴 not healthy — ${h.detail}`)) + "\n");
+          appendTurn(root, "shepherd", `Post-deploy health for ${url}: ${h.ok ? "healthy" : "unhealthy"} (${h.detail}).`);
+          continue;
+        }
+        if (/\b(pipeline|workflow|ci\/?cd|ci)\b/i.test(line)) {
+          const orderPath = writeDeployOrder(root, buildDeployOrder(new Date().toISOString()));
+          const msg =
+            `Wrote a gated CI/CD pipeline work-order to ${orderPath.replace(/\\/g, "/")} — a deploy workflow with the Shepherd gate baked in ` +
+            `(build → test → gate → deploy, where deploy only runs if the gate passed). I describe it; your Claude Code session writes the YAML.`;
+          console.log("\n  " + msg + "\n");
+          appendTurn(root, "shepherd", msg);
+          continue;
+        }
+        const r = releaseReadiness(root);
+        printReleaseReadiness(r);
+        if (!r.ready) {
+          const hint = !r.cert
+            ? `Say “/certify” to prove the build first.`
+            : !r.cert.certified
+              ? `Close the gates, then “/certify”.`
+              : `Re-run “/certify” so the proof matches what you're shipping.`;
+          console.log(pc.dim("  " + hint) + "\n");
+          appendTurn(root, "shepherd", r.reason + " — " + hint);
+        } else {
+          appendTurn(root, "shepherd", r.reason);
+        }
+        if (!r.hasPipeline && r.isRepo) {
+          console.log(pc.dim("  (No deploy pipeline yet — “/release-check pipeline” writes a gated CI/CD work-order so this gate runs on every push.)\n"));
+        }
         continue;
       }
 
