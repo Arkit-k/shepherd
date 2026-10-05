@@ -183,15 +183,61 @@ Every probe hits **localhost only**, against a server Shepherd itself starts, wi
 
 ## Install
 
+**Not published to npm yet.** The bare name `shepherd` on the registry belongs to an
+unrelated 2022 package, so `npx shepherd` does **not** run this project. Until a scoped
+release goes out, run it from source:
+
 ```bash
-npm i -g shepherd      # or just use npx
+git clone https://github.com/Arkit-k/shepherd && cd shepherd
+npm ci && npm run build
+node dist/cli.js /path/to/your/repo
 ```
 
 Requires Node 18+. The conversation and deep reviews use [Claude Code](https://claude.com/claude-code) on your own account when present; without it, the deterministic audit still runs free.
 
+## Hardening log — what turning the tool on itself found
+
+A gate's only real credential is its own correctness, so this section stays in the
+README rather than a changelog. Everything below was found by running Shepherd and
+its own test suite against Shepherd and one 281-file production repo.
+
+**The gate could report PASS without having reviewed anything.** `shallowClone`'s
+fallback path ignored every `git` exit code, so when both clone attempts failed it
+returned an *empty* temp directory. The scan then found nothing, `goLiveVerdict` saw
+zero findings, and the PR check went green. One level up, the error handler reported
+GitHub's `neutral` conclusion — which **branch protection counts as passing** — so a
+clone, token, or API failure silently let a PR merge. A gate that fails open is worse
+than no gate. It now throws, cleans up, and reports `failure`: a review that could not
+run is not a pass.
+
+**An installation token could reach a public PR comment.** The same error handler
+interpolated the raw error into the PR summary. The token is embedded in the clone
+URL, so any error carrying that URL would have published a live GitHub token into a
+public thread. Errors are now redacted, with a test asserting it.
+
+**The webhook handler blocked the event loop for up to 120 seconds.** `spawnSync` for
+`git clone` inside the handler serialised every review and stalled all other requests.
+Now async.
+
+**Two classes of false positive that would have trained users to ignore it.** A comment
+reading `// FIXME: add upstash rate-limit` *satisfied* the rate-limit check and silenced
+a critical cost-bomb gate; comments are now blanked while byte offsets are preserved, so
+a match still maps to the right line. And `hardcoded-localhost` was set to **block the
+push** while real security findings only advised — the severity model was inverted.
+
+**The detector blocked this repo on its own test fixture.** A JWT-shaped string is not
+a credential: real HS256 signatures are ~43 base64url chars and both leading segments
+decode to JSON. `exposed-secret` now checks that structure instead of the `eyJ` prefix,
+which removes the false positive everywhere rather than exempting a path — and the
+fixtures are assembled at runtime so no secret-shaped literal sits in the source.
+
+Before: 3 blocking findings on the 281-file repo, 2 of 5 with a line number.
+After: 1 blocking finding — a true positive, a public unauthenticated LLM proxy holding
+an API key — and 5 of 5 annotatable. 18 tests, where there had been none.
+
 ## Status
 
-The engine is built and verified end-to-end on real AI-built repos; the agent interface + memory loop (soul, grounded reviews, conversational triage, test generation, living profile, rule self-evolution) are in; and the **GitHub App** (server-side PR gate, free deterministic tier) is built — register + deploy per [`src/app/README.md`](src/app/README.md). See [`ROADMAP.md`](ROADMAP.md) for the rest.
+The engine is built and runs end-to-end on real AI-built repos; the agent interface + memory loop (soul, grounded reviews, conversational triage, test generation, living profile, rule self-evolution) are in; and the **GitHub App** (server-side PR gate, free deterministic tier) is built — register + deploy per [`src/app/README.md`](src/app/README.md). See [`ROADMAP.md`](ROADMAP.md) for the rest.
 
 ## License
 

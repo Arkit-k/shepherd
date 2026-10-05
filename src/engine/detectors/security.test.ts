@@ -23,6 +23,29 @@ function repo(files: Record<string, string>): Repo {
 const ids = (fs: ReturnType<typeof security>): string[] => fs.map((f) => f.id);
 const find = (fs: ReturnType<typeof security>, id: string) => fs.find((f) => f.id === id);
 
+// Secret fixtures are ASSEMBLED, never written as literals.
+//
+// A literal token in this file would be scanned as a real leak by GitHub, and —
+// as dogfooding caught — flagged as a critical finding by Shepherd's own
+// exposed-secret detector, which blocked Shepherd's own repo. A detector that
+// gates on its own fixtures is a detector people switch off.
+const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
+const sig = (n: number) => "a".repeat(n);
+
+/** Structurally valid JWT: decodable segments and a plausible 43-char signature. */
+function realisticJwt(): string {
+  return [
+    b64({ alg: "HS256", typ: "JWT" }),
+    b64({ iss: "supabase", ref: "abcdefghijklmnopqrst", role: "service_role", iat: 1, exp: 2 }),
+    sig(43),
+  ].join(".");
+}
+
+/** Right prefix, impossible signature — the shape of a test fixture, not a credential. */
+function implausibleJwt(): string {
+  return [b64({ alg: "HS256" }), b64({ role: "service_role" }), sig(10)].join(".");
+}
+
 // ───────────────────────── true positives ─────────────────────────
 
 test("reports cost-bomb for a public AI route with no rate limiting", () => {
@@ -42,12 +65,21 @@ test("reports cost-bomb for a public AI route with no rate limiting", () => {
 });
 
 test("reports exposed-secret for a hardcoded JWT", () => {
-  const out = security(
-    repo({
-      "lib/db.ts": `const key = "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.abcdefghij";`,
-    }),
-  );
+  const out = security(repo({ "lib/db.ts": `const key = "${realisticJwt()}";` }));
   assert.ok(ids(out).includes("exposed-secret"));
+});
+
+test("does not flag a token whose signature is too short to be real", () => {
+  const out = security(repo({ "lib/db.ts": `const key = "${implausibleJwt()}";` }));
+  assert.ok(
+    !ids(out).includes("exposed-secret"),
+    "an HS256 signature is 43 base64url chars; anything shorter is a fixture, not a credential",
+  );
+});
+
+test("does not flag a token whose segments are not decodable JSON", () => {
+  const out = security(repo({ "lib/db.ts": `const key = "eyJxxxxxxxx.eyJyyyyyyyy.${sig(43)}";` }));
+  assert.ok(!ids(out).includes("exposed-secret"));
 });
 
 // ─────────── bug 1: a comment must not silence a critical finding ───────────
@@ -212,7 +244,7 @@ test("does not flag localhost inside a config or test file", () => {
 test("ignores secrets in .example files", () => {
   const out = security(
     repo({
-      ".env.example": `OPENAI_API_KEY="sk-abcdefghijklmnopqrstuvwxyz"`,
+      ".env.example": `OPENAI_API_KEY="sk-${"x".repeat(26)}"`,
     }),
   );
   assert.ok(!ids(out).includes("exposed-secret"));

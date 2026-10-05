@@ -7,8 +7,36 @@ import type { Finding } from "../report.js";
 // alone reads as a false positive on any code that merely mentions Supabase (or, as
 // dogfooding caught, on this detector's own pattern source). A leaked service_role
 // key IS a JWT, so we match the JWT shape instead.
-const SECRET_PATTERNS: { re: RegExp; label: string }[] = [
-  { re: /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/, label: "a hardcoded JWT (e.g. a Supabase service_role/anon key or an auth token)" },
+// A JWT-shaped string is not automatically a credential. Test fixtures and docs
+// examples share the `eyJ…` prefix but fall apart under inspection, and gating on
+// them is how a detector loses the user's trust — dogfooding caught Shepherd
+// blocking its OWN repo on its own fixture.
+//
+// Two structural facts separate a credential from a placeholder:
+//   - an HS256/RS256 signature is ~43+ base64url chars; a fixture's is short
+//   - the header and payload of a real token decode to JSON
+function looksLikeRealJwt(token: string): boolean {
+  const parts = token.split(".");
+  if (parts.length !== 3) return false;
+  const [header, payload, signature] = parts as [string, string, string];
+  if (signature.length < 40) return false;
+  return [header, payload].every((seg) => {
+    try {
+      const json = Buffer.from(seg, "base64url").toString("utf8");
+      const parsed: unknown = JSON.parse(json);
+      return typeof parsed === "object" && parsed !== null;
+    } catch {
+      return false;
+    }
+  });
+}
+
+const SECRET_PATTERNS: { re: RegExp; label: string; valid?: (m: string) => boolean }[] = [
+  {
+    re: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
+    label: "a hardcoded JWT (e.g. a Supabase service_role/anon key or an auth token)",
+    valid: looksLikeRealJwt,
+  },
   { re: /\bsk-[A-Za-z0-9]{20,}\b/, label: "an OpenAI-style secret key (sk-…)" },
   { re: /AKIA[0-9A-Z]{16}/, label: "an AWS access key id (AKIA…)" },
   { re: /(OPENAI|ANTHROPIC|SUPABASE_SERVICE)[A-Z_]*\s*=\s*['"][A-Za-z0-9_\-]{16,}['"]/, label: "a hardcoded API key assignment" },
@@ -142,10 +170,10 @@ export function security(repo: Repo): Finding[] {
     }
 
     // 2. 🔴 hardcoded secret in source
-    for (const { re, label } of SECRET_PATTERNS) {
+    for (const { re, label, valid } of SECRET_PATTERNS) {
       if (/\.example$/.test(f.path)) break;
       const m = f.content.match(re);
-      if (m) {
+      if (m && (!valid || valid(m[0]))) {
         out.push({
           id: "exposed-secret",
           severity: "critical",
