@@ -1,7 +1,7 @@
 {
   "name": "shepherd",
   "version": "0.0.1",
-  "description": "Production-readiness gate for AI-written code — you code, we shepherd it to production.",
+  "description": "Production-readiness gate for AI-written code \u2014 you code, we shepherd it to production.",
   "type": "module",
   "bin": {
     "shepherd": "./dist/cli.js",
@@ -13,7 +13,8 @@
     "app": "tsx src/app/server.ts",
     "start:app": "node dist/app/server.js",
     "build": "tsc",
-    "start": "node dist/cli.js"
+    "start": "node dist/cli.js",
+    "test": "tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",

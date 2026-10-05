@@ -1,5 +1,5 @@
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Octokit } from "octokit";
@@ -95,21 +95,99 @@ export async function reviewCheckout(dir: string, changedFiles: string[]): Promi
 }
 
 // ── git clone of the PR head (token in the URL; never logged) ─────────────────
-function shallowClone(cloneUrl: string, headRef: string, sha: string, token: string): string {
+//
+// Async on purpose. This runs inside a webhook handler: a synchronous clone with
+// a 120s timeout blocks the event loop, so one PR review stalls every other
+// request on the server and GitHub's redelivery piles up behind it.
+//
+// It also throws rather than returning a half-built directory. The old version
+// ignored the fallback's exit codes, so a failed clone yielded an EMPTY temp dir,
+// the scan found nothing, and the gate reported a pass — a silent false PASS.
+async function git(args: string[], timeout: number, token: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn("git", args, { stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, timeout);
+
+    child.stderr?.on("data", (d: Buffer) => {
+      stderr += d.toString();
+    });
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(new Error(`git ${args[0]} failed: ${redact(err.message, token)}`));
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (timedOut) return reject(new Error(`git ${args[0]} timed out after ${timeout}ms`));
+      if (code !== 0) {
+        return reject(new Error(`git ${args[0]} exited ${code}: ${redact(stderr.trim(), token)}`));
+      }
+      resolve();
+    });
+  });
+}
+
+// The token is embedded in the clone URL, so it can appear in git's stderr.
+function redact(s: string, token: string): string {
+  return token ? s.split(token).join("***") : s;
+}
+
+export async function shallowClone(
+  cloneUrl: string,
+  headRef: string,
+  sha: string,
+  token: string,
+): Promise<string> {
   const dir = mkdtempSync(path.join(os.tmpdir(), "shep-pr-"));
   const authUrl = cloneUrl.replace(/^https:\/\//, `https://x-access-token:${token}@`);
-  // a branch clone lands directly on the head tip (== sha for synchronize).
-  const branch = spawnSync("git", ["clone", "--depth", "1", "--no-tags", "--branch", headRef, authUrl, dir], {
-    encoding: "utf8",
-    timeout: 120_000,
-  });
-  if (branch.status !== 0) {
+
+  try {
+    // a branch clone lands directly on the head tip (== sha for synchronize).
+    await git(["clone", "--depth", "1", "--no-tags", "--branch", headRef, authUrl, dir], 120_000, token);
+    return dir;
+  } catch {
     // fallback: default clone, then fetch + checkout the exact sha.
-    spawnSync("git", ["clone", "--depth", "1", "--no-tags", authUrl, dir], { encoding: "utf8", timeout: 120_000 });
-    spawnSync("git", ["-C", dir, "fetch", "--depth", "1", "origin", sha], { encoding: "utf8", timeout: 60_000 });
-    spawnSync("git", ["-C", dir, "checkout", sha], { encoding: "utf8", timeout: 30_000 });
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(dir, { recursive: true });
+      await git(["clone", "--depth", "1", "--no-tags", authUrl, dir], 120_000, token);
+      await git(["-C", dir, "fetch", "--depth", "1", "origin", sha], 60_000, token);
+      await git(["-C", dir, "checkout", sha], 30_000, token);
+      return dir;
+    } catch (err) {
+      rmSync(dir, { recursive: true, force: true });
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`could not clone the PR head (${redact(msg, token)})`);
+    }
   }
-  return dir;
+}
+
+// A gate must fail CLOSED.
+//
+// This used to report `conclusion: "neutral"` so as not to "crash the webhook",
+// but GitHub branch protection counts `neutral` as PASSING for a required check.
+// So any error on the path to the review — clone failure, token failure, API
+// failure — quietly let the PR merge. That is the same silent-pass bug as
+// returning an empty checkout, just one level further up.
+//
+// `failure` is correct here: Shepherd is asserting "I could not establish that
+// this PR is safe", and for a gate that is a block, not a shrug. The next push
+// re-runs it.
+export function errorOutput(err: unknown, token: string): CheckOutput {
+  const raw = err instanceof Error ? err.message : String(err);
+  return {
+    conclusion: "failure",
+    title: "Shepherd couldn't complete the review",
+    summary:
+      `${COMMENT_MARKER}\nShepherd hit an error reviewing this PR: \`${redact(raw, token)}\`.\n\n` +
+      `The gate fails closed: a review that could not run is not a pass. ` +
+      `Push again to retry, or re-run this check.`,
+    annotations: [],
+  };
 }
 
 // The webhook context we actually use (structurally typed to avoid octokit's heavy
@@ -135,10 +213,12 @@ export async function handlePullRequest(ctx: PRContext): Promise<void> {
 
   const checkId = await createCheckRun(octokit, owner, repo, headSha);
   let tmp: string | null = null;
+  // hoisted so the catch below can redact it out of anything user-visible.
+  let token = "";
   try {
     const changed = await listChangedFiles(octokit, owner, repo, pr.number);
-    const token = await installationToken(octokit);
-    tmp = shallowClone(cloneUrl, pr.head.ref, headSha, token);
+    token = await installationToken(octokit);
+    tmp = await shallowClone(cloneUrl, pr.head.ref, headSha, token);
 
     const result = await reviewCheckout(tmp, changed);
     const out: CheckOutput = {
@@ -150,14 +230,8 @@ export async function handlePullRequest(ctx: PRContext): Promise<void> {
     await completeCheckRun(octokit, owner, repo, checkId, out);
     await upsertSummaryComment(octokit, owner, repo, pr.number, result.summary);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    // never crash the webhook — report a neutral check the user can re-run.
-    await completeCheckRun(octokit, owner, repo, checkId, {
-      conclusion: "neutral",
-      title: "Shepherd couldn't complete the review",
-      summary: `${COMMENT_MARKER}\nShepherd hit an error reviewing this PR: \`${message}\`. It will retry on the next push.`,
-      annotations: [],
-    });
+    // never crash the webhook, but never pass the gate either — see errorOutput.
+    await completeCheckRun(octokit, owner, repo, checkId, errorOutput(err, token));
   } finally {
     if (tmp) {
       try {
