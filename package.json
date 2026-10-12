@@ -5,7 +5,8 @@
   "type": "module",
   "bin": {
     "shepherd": "./dist/cli.js",
-    "shepherd-mcp": "./dist/mcp.js"
+    "shepherd-mcp": "./dist/mcp.js",
+    "shepherd-hook": "./dist/hook.js"
   },
   "scripts": {
     "dev": "tsx src/cli.ts",

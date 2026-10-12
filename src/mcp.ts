@@ -115,15 +115,24 @@ server.tool(
     label: z.string().describe("Short name for this session, e.g. 'research' or 'frontend'. Other sessions address you by this."),
   },
   async ({ label }) => {
-    const id = board.newId();
+    // Rejoining under a label you already used RESUMES that identity. A one-shot
+    // client (claude -p) is a new process every turn; minting a fresh id each
+    // time would orphan any request already addressed to the earlier one, so
+    // `inbox` would come back empty for work that is genuinely waiting.
+    const prior = board.read(root()).sessions.find(
+      (x) => x.label.toLowerCase() === label.toLowerCase(),
+    );
+    const id = prior?.id ?? board.newId();
     me = { id, label };
-    board.append(root(), { kind: "join", at: board.now(), session: id, label });
+    if (!prior) {
+      board.append(root(), { kind: "join", at: board.now(), session: id, label });
+    }
     const st = board.read(root());
     const others = st.sessions.filter((s) => s.id !== id).map((s) => s.label);
     return {
       content: [{
         type: "text",
-        text: `Joined as "${label}" (${id.slice(0, 8)}).\n` +
+        text: `${prior ? "Resumed" : "Joined"} as "${label}" (${id.slice(0, 8)}).\n` +
           (others.length ? `Other sessions on the board: ${others.join(", ")}` : "You are the first session here.") +
           `\n\nHuman-readable view: ${board.mirrorPath(root())}`,
       }],
@@ -221,6 +230,26 @@ server.tool(
     if (!a) return { content: [{ type: "text", text: `No request matching "${request_id}". Check \`inbox\`.` }] };
     board.append(root(), { kind: "answer", at: board.now(), id: board.newId(), ask: a.id, from: m.id, content });
     return { content: [{ type: "text", text: `Answered ${a.id.slice(0, 8)} back to ${a.fromLabel}.` }] };
+  },
+);
+
+server.tool(
+  "said",
+  "Read what the HUMAN has typed across ALL sessions, including sessions you are not part of. Captured by a UserPromptSubmit hook, so it is their actual words rather than another session's summary. Use this to work out what they want, what they have decided, and what they have changed their mind about.",
+  {
+    limit: z.number().default(40).describe("How many of the most recent messages to return."),
+    from: z.string().optional().describe("Only messages typed into this session label."),
+  },
+  async ({ limit, from }) => {
+    const st = board.read(root());
+    let said = st.said;
+    if (from) said = said.filter((m) => m.label.toLowerCase() === from.toLowerCase());
+    if (!said.length) {
+      return { content: [{ type: "text", text: "Nothing captured. The UserPromptSubmit hook is probably not installed — see README." }] };
+    }
+    return {
+      content: [{ type: "text", text: JSON.stringify(said.slice(-limit), null, 2) }],
+    };
   },
 );
 
