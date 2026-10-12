@@ -6,6 +6,7 @@ import path from "node:path";
 import { z } from "zod";
 import { scan } from "./engine/run.js";
 import { buildFixOrder, writeFixOrder } from "./engine/handoff.js";
+import * as board from "./engine/board.js";
 
 // Shepherd as an MCP server — this is how Claude Code "wires in".
 //
@@ -91,6 +92,135 @@ server.tool(
       /* still return the order even if the file write fails */
     }
     return { content: [{ type: "text", text: order }] };
+  },
+);
+
+// ── Multi-session board ──────────────────────────────────────────────────────
+// Several Claude sessions, each running its own copy of this server, coordinate
+// through an append-only log on disk. A session publishes what it found, reads
+// what everyone else found, and can ask another session to dig further.
+
+let me: { id: string; label: string } | null = null;
+const root = () => process.cwd();
+
+function requireJoin(): { id: string; label: string } {
+  if (!me) throw new Error("Call `join` first so the other sessions know who you are.");
+  return me;
+}
+
+server.tool(
+  "join",
+  "Register THIS Claude session on the shared board so other sessions can see it and address requests to it. Call this once at the start. Pick a short label describing what this session is for, e.g. 'research', 'frontend', 'reviewer'.",
+  {
+    label: z.string().describe("Short name for this session, e.g. 'research' or 'frontend'. Other sessions address you by this."),
+  },
+  async ({ label }) => {
+    const id = board.newId();
+    me = { id, label };
+    board.append(root(), { kind: "join", at: board.now(), session: id, label });
+    const st = board.read(root());
+    const others = st.sessions.filter((s) => s.id !== id).map((s) => s.label);
+    return {
+      content: [{
+        type: "text",
+        text: `Joined as "${label}" (${id.slice(0, 8)}).\n` +
+          (others.length ? `Other sessions on the board: ${others.join(", ")}` : "You are the first session here.") +
+          `\n\nHuman-readable view: ${board.mirrorPath(root())}`,
+      }],
+    };
+  },
+);
+
+server.tool(
+  "share",
+  "Publish a finding, result or piece of research to the shared board so every other Claude session can read it. Use this whenever you learn something the other sessions would need to know.",
+  {
+    title: z.string().describe("One line describing what this is."),
+    content: z.string().describe("The finding itself. Be specific — another session will act on this without seeing your conversation."),
+    tags: z.array(z.string()).default([]).describe("Optional tags, e.g. ['api', 'auth']."),
+  },
+  async ({ title, content, tags }) => {
+    const m = requireJoin();
+    const id = board.newId();
+    board.append(root(), { kind: "share", at: board.now(), id, session: m.id, title, content, tags });
+    return { content: [{ type: "text", text: `Shared "${title}" as ${id.slice(0, 8)}. Every session can now read it via \`board\`.` }] };
+  },
+);
+
+server.tool(
+  "board",
+  "Read the shared board: which sessions are active, everything they have shared, and any open requests. Call this to see what the other Claude sessions have found before doing work yourself — they may already have the answer.",
+  {
+    tag: z.string().optional().describe("Only return findings carrying this tag."),
+  },
+  async ({ tag }) => {
+    const st = board.read(root());
+    const shares = tag ? st.shares.filter((s) => s.tags.includes(tag)) : st.shares;
+    const open = st.asks.filter((a) => !a.answer);
+    const payload = {
+      sessions: st.sessions.map((s) => ({ label: s.label, id: s.id.slice(0, 8), you: s.id === me?.id })),
+      shared: shares.map((s) => ({ id: s.id.slice(0, 8), by: s.label, title: s.title, tags: s.tags, content: s.content, at: s.at })),
+      open_requests: open.map((a) => ({ id: a.id.slice(0, 8), from: a.fromLabel, to: st.sessions.find((x) => x.id === a.to)?.label, request: a.request })),
+    };
+    return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
+  },
+);
+
+server.tool(
+  "ask",
+  "Ask ANOTHER Claude session to do more work and hand the result back to you. The other session gets woken up with your request. Use when a different session owns that context — e.g. the 'research' session should dig deeper on something it already looked at.",
+  {
+    to: z.string().describe("Label of the session to ask, e.g. 'research'. Use `board` to see who is available."),
+    request: z.string().describe("What you want them to do. Be explicit — they cannot see your conversation."),
+  },
+  async ({ to, request }) => {
+    const m = requireJoin();
+    const st = board.read(root());
+    const target = board.resolve(st, to);
+    if (!target) {
+      return { content: [{ type: "text", text: `No session called "${to}". On the board: ${st.sessions.map((s) => s.label).join(", ") || "(none)"}` }] };
+    }
+    if (target.id === m.id) {
+      return { content: [{ type: "text", text: "That is this session. Pick a different one." }] };
+    }
+    const id = board.newId();
+    board.append(root(), { kind: "ask", at: board.now(), id, from: m.id, to: target.id, request });
+    return { content: [{ type: "text", text: `Asked "${target.label}": ${request}\nRequest ${id.slice(0, 8)}. They will be notified; their answer appears in \`board\` and \`inbox\`.` }] };
+  },
+);
+
+server.tool(
+  "inbox",
+  "Show requests other Claude sessions have addressed to THIS session and that you have not answered yet. Check this when you are notified, or before going idle.",
+  {},
+  async () => {
+    const m = requireJoin();
+    const st = board.read(root());
+    const mine = st.asks.filter((a) => a.to === m.id && !a.answer);
+    if (!mine.length) return { content: [{ type: "text", text: "Nothing waiting for you." }] };
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify(mine.map((a) => ({ id: a.id.slice(0, 8), from: a.fromLabel, request: a.request, at: a.at })), null, 2),
+      }],
+    };
+  },
+);
+
+server.tool(
+  "answer",
+  "Hand a result back to the session that asked you for it. Answer the request id from `inbox`.",
+  {
+    request_id: z.string().describe("The request id from `inbox` (the short 8-character form is fine)."),
+    content: z.string().describe("The result. Write it so the asking session can act on it without seeing your conversation."),
+  },
+  async ({ request_id, content }) => {
+    const m = requireJoin();
+    const st = board.read(root());
+    const a = st.asks.find((x) => x.id === request_id || x.id.startsWith(request_id));
+    if (!a) return { content: [{ type: "text", text: `No request matching "${request_id}". Check \`inbox\`.` }] };
+    board.append(root(), { kind: "answer", at: board.now(), id: board.newId(), ask: a.id, from: m.id, content });
+    return { content: [{ type: "text", text: `Answered ${a.id.slice(0, 8)} back to ${a.fromLabel}.` }] };
   },
 );
 
