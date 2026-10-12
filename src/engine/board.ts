@@ -179,6 +179,9 @@ export function writeMirror(root: string): void {
  * back to creating one here.
  */
 export function boardRoot(from: string): string {
+  // An explicit board wins: that is how two sessions in DIFFERENT project
+  // directories are pointed at the same board.
+  if (process.env.SHEPHERD_BOARD) return path.resolve(process.env.SHEPHERD_BOARD);
   let d = path.resolve(from);
   for (let i = 0; i < 12; i++) {
     if (existsSync(path.join(d, ".shepherd"))) return d;

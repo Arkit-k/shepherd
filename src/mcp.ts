@@ -2,6 +2,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { watch, existsSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { z } from "zod";
 import { scan } from "./engine/run.js";
@@ -101,7 +102,7 @@ server.tool(
 // what everyone else found, and can ask another session to dig further.
 
 let me: { id: string; label: string } | null = null;
-const root = () => process.cwd();
+const root = () => board.boardRoot(process.cwd());
 
 function requireJoin(): { id: string; label: string } {
   if (!me) throw new Error("Call `join` first so the other sessions know who you are.");
@@ -249,6 +250,47 @@ server.tool(
     }
     return {
       content: [{ type: "text", text: JSON.stringify(said.slice(-limit), null, 2) }],
+    };
+  },
+);
+
+server.tool(
+  "spawn",
+  "Launch ANOTHER Claude session, joined to this same board, in its own terminal window. Use when a job needs a second pair of hands the user can also talk to — a 'research' session to dig while you keep working, or a second 'main'. The new session shares this board, so whatever it finds is visible here and the user's messages to it are visible to you.",
+  {
+    label: z.string().describe("Label for the new session, e.g. 'research' or 'reviewer'. Must not already be taken."),
+    task: z.string().optional().describe("What the new session should start on. It is told this as its first instruction."),
+  },
+  async ({ label, task }) => {
+    const st = board.read(root());
+    if (board.resolve(st, label)) {
+      return { content: [{ type: "text", text: `A session called "${label}" is already on this board. Pick another label or use \`ask\` to give it work.` }] };
+    }
+    const dir = process.cwd();
+    const boardDir = root();
+    const q = (x: string) => `'${x.replace(/'/g, `'\\''`)}'`;
+    const prompt =
+      `Join the shepherd board as '${label}'.` +
+      (task ? ` Your task: ${task}` : "") +
+      ` Share what you find with \`share\` so the other sessions can see it, and check \`inbox\` for requests.`;
+    const cmd =
+      `cd ${q(dir)} && export SHEPHERD_SESSION_LABEL=${q(label)} && ` +
+      `export SHEPHERD_BOARD=${q(boardDir)} && claude ${q(prompt)}`;
+
+    if (process.platform !== "darwin") {
+      return { content: [{ type: "text", text: `Cannot open a window on this platform. Run this yourself:\n\n  ${cmd}` }] };
+    }
+    const script = `tell application "Terminal"\n activate\n do script ${JSON.stringify(cmd)}\nend tell`;
+    const r = spawnSync("osascript", ["-e", script], { stdio: "ignore" });
+    if (r.status !== 0) {
+      return { content: [{ type: "text", text: `Could not open a terminal. Run this yourself:\n\n  ${cmd}` }] };
+    }
+    return {
+      content: [{
+        type: "text",
+        text: `Opened a new terminal running session "${label}"${task ? `, started on: ${task}` : ""}.\n` +
+          `It shares this board, so use \`board\` to see what it finds and \`ask\` to send it work.`,
+      }],
     };
   },
 );
