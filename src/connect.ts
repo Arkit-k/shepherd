@@ -157,8 +157,13 @@ async function main() {
   const boardName = (disconnecting ? args[1] : args[0]) ?? DEFAULT_BOARD;
 
   const map = readConnections();
+  // Do NOT exclude this session. The common way to run this is `!shepherd-connect`
+  // from inside a Claude session — leaving yourself out would tick everyone else
+  // onto a board you are not on, which is never what was meant. It is listed
+  // first, marked, and preselected.
   const self = selfSessionId();
-  let sessions = liveSessions().filter((s) => s.sessionId !== self);
+  let sessions = liveSessions();
+  sessions.sort((a, b) => Number(b.sessionId === self) - Number(a.sessionId === self));
 
   if (disconnecting) sessions = sessions.filter((s) => map[s.sessionId]);
 
@@ -166,7 +171,7 @@ async function main() {
     console.log(
       disconnecting
         ? "No connected sessions are running."
-        : "No other Claude sessions are running. Open some, then run this again.",
+        : "No Claude sessions found. Is ~/.claude/sessions readable?",
     );
     return;
   }
@@ -180,9 +185,10 @@ async function main() {
   const rows = sessions.map((s) => {
     const c = map[s.sessionId];
     const on = c ? dim(`  · on "${c.board}"`) : "";
+    const isSelf = s.sessionId === self;
     return {
-      text: `${labelFor(s).padEnd(18)} ${dim(short(s.cwd))}${on}`,
-      preselected: disconnecting ? true : c?.board === boardName,
+      text: `${labelFor(s).padEnd(18)} ${dim(short(s.cwd))}${isSelf ? dim("  (this session)") : ""}${on}`,
+      preselected: disconnecting ? true : isSelf || c?.board === boardName,
     };
   });
 
