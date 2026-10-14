@@ -19,7 +19,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { randomUUID } from "node:crypto";
+import { boardPath, connectionFor } from "./boards.js";
 
 export type Event =
   | { kind: "join"; at: string; session: string; label: string; cwd?: string }
@@ -177,16 +179,32 @@ export function writeMirror(root: string): void {
 }
 
 /**
- * Find the board a given directory belongs to. The hook can fire from anywhere
- * under the project, so walk up looking for an existing .shepherd before falling
- * back to creating one here.
+ * Which board does this session write to?
+ *
+ * This is the only place that decision is made, which is what lets `shepherd
+ * connect` work at all: connecting a running session does not inject anything
+ * into it — the hook is already firing there — it just changes the answer here.
+ *
+ * Order matters. An explicit SHEPHERD_BOARD beats everything because the
+ * launcher and `spawn` set it deliberately; a connection beats the directory
+ * walk because the user picked it; the walk is the fallback for a session nobody
+ * has said anything about.
  */
-export function boardRoot(from: string): string {
-  // An explicit board wins: that is how two sessions in DIFFERENT project
-  // directories are pointed at the same board.
+export function boardRoot(from: string, sessionId?: string): string {
   if (process.env.SHEPHERD_BOARD) return path.resolve(process.env.SHEPHERD_BOARD);
+
+  const conn = connectionFor(sessionId);
+  if (conn) return boardPath(conn.board);
+
+  // Walk up for a project that already has a board. Stop at the home directory:
+  // ~/.shepherd is Shepherd's own home (boards, connect.json), not a project
+  // board, and matching it would quietly put every unconnected session on this
+  // machine onto one shared board — which is the exact thing `connect` is meant
+  // to be a deliberate choice about.
+  const home = path.resolve(os.homedir());
   let d = path.resolve(from);
   for (let i = 0; i < 12; i++) {
+    if (d === home) break;
     if (existsSync(path.join(d, ".shepherd"))) return d;
     const up = path.dirname(d);
     if (up === d) break;

@@ -38,11 +38,56 @@ claude mcp add -s user shepherd -- node /ABSOLUTE/PATH/shepherd/dist/mcp.js
 }
 ```
 
-**3. Launch each session with a label:**
+## Connecting sessions you already have open
+
+You will not plan this in advance. You have four Claude sessions open across
+four projects and *then* you want two of them talking to each other.
 
 ```bash
-SHEPHERD_SESSION_LABEL=main   claude
-SHEPHERD_SESSION_LABEL=intent claude
+shepherd-connect            # tick sessions, connect them to the "default" board
+shepherd-connect ship       # ... to a board called "ship"
+shepherd-connect --status   # who is on what
+shepherd-connect --disconnect
+```
+
+```
+  Connect which sessions to board ship?
+
+  ↑↓ move · space toggle · a all · enter confirm · esc cancel
+
+  ❯ ◉ portfolio          ~/Projects/portfolio
+    ◉ shepherd           ~/Projects/shepherd
+    ◯ scratch            ~/Desktop/scratch       · on "default"
+```
+
+Ticked sessions are on the board from their next message. You do not have to tell
+them anything, and they do not have to call `join`.
+
+### How that is possible
+
+Nothing can reach into a running interactive Claude session and make it run a
+tool. There is no IPC for it and no injection.
+
+It does not need one. The `UserPromptSubmit` hook is installed globally, so it is
+**already firing in every Claude session on this machine** — every one of them is
+already capturing prompts. They are unconnected only because `boardRoot()` sends
+each one to a board derived from its own working directory.
+
+So `connect` injects nothing. It writes `~/.shepherd/connect.json`, which maps a
+session id to a board, and `boardRoot()` consults it. The plumbing already
+existed; only the routing was wrong. The first prompt after ticking also appends
+the session's `join` event, so it becomes a real addressable identity — it shows
+up in `board` and you can `ask` it — without anyone calling the tool.
+
+Sessions are keyed by **session id**, not directory, which is what lets two
+sessions in the same folder sit on different boards, and stops a session changing
+board because you `cd`'d.
+
+## Launching a session already on a board
+
+```bash
+shepherd-session main ship    # new terminal, labelled "main", on board "ship"
+shepherd-session --list       # boards and who is on them
 ```
 
 The label is how other sessions address you and how your messages are attributed.
@@ -71,9 +116,18 @@ writes. Appends don't collide, and replaying the log gives the full audit trail.
 
 - **Pull, not interrupt.** `ask` records a request; the other session sees it when
   it calls `inbox`. Nothing yanks a session mid-thought.
-- **One machine, one folder.** Only `append()` and `read()` touch storage, so
-  pointing them at a remote store would work across machines without changing a
-  single tool. Not done.
+- **Connecting routes future prompts.** What a session said before you ticked it
+  stays where it was. Nothing is deleted; it just stops writing there, and
+  `connect` prints what moved.
+- **Discovery sees live processes only.** Read from Claude Code's own registry at
+  `~/.claude/sessions/*.json`. `--status` marks sessions that have exited and
+  `--prune` clears them.
+- **`--fork-session` mints a new session id**, so a forked session arrives
+  unconnected and has to be ticked again. A plain `--resume` keeps its id and
+  stays connected.
+- **One machine.** Only `append()` and `read()` touch storage, so pointing them at
+  a remote store would work across machines without changing a single tool. Not
+  done.
 - **Anyone on your board can put instructions into your agent.** Fine between
   sessions you own. Needs identity and an approval step before it is shared with
   another person.

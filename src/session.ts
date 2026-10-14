@@ -12,13 +12,10 @@
 // the board you are on. That separation is the point: you can have a session in
 // each of three projects, all on one board.
 import { spawnSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { SESSION_TOOLS } from "./engine/session-tools.js";
-
-const BOARDS = path.join(os.homedir(), ".shepherd", "boards");
-const boardPath = (name: string) => path.join(BOARDS, name);
+import { BOARDS, boardPath, DEFAULT_BOARD, ensureBoard } from "./engine/boards.js";
 
 const args = process.argv.slice(2);
 
@@ -65,11 +62,9 @@ if (args[0] === "--list" || args[0] === "-l") {
 }
 
 const label = args[0] ?? path.basename(process.cwd());
-const boardName = args[1] ?? "default";
-const board = boardPath(boardName);
+const boardName = args[1] ?? DEFAULT_BOARD;
+const board = ensureBoard(boardName);
 const dir = process.cwd();
-
-mkdirSync(path.join(board, ".shepherd"), { recursive: true });
 
 const prompt =
   `Join the shepherd board as '${label}'. Then tell me who else is on the board and wait. ` +
@@ -78,7 +73,7 @@ const prompt =
 const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 // Pre-allow the board tools. Without this the session opens and then sits at a
 // permission prompt before it can even join, which looks like a hang.
-const BOARD_TOOLS = "mcp__shepherd__join mcp__shepherd__share mcp__shepherd__board mcp__shepherd__ask mcp__shepherd__inbox mcp__shepherd__answer mcp__shepherd__said mcp__shepherd__spawn";
+const BOARD_TOOLS = SESSION_TOOLS.join(" ");
 
 const cmd =
   `cd ${q(dir)} && export SHEPHERD_SESSION_LABEL=${q(label)} && ` +

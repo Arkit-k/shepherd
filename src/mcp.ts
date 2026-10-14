@@ -9,6 +9,7 @@ import { scan } from "./engine/run.js";
 import { buildFixOrder, writeFixOrder } from "./engine/handoff.js";
 import * as board from "./engine/board.js";
 import { SESSION_TOOLS } from "./engine/session-tools.js";
+import { selfSessionId } from "./engine/sessions.js";
 
 // Shepherd as an MCP server — this is how Claude Code "wires in".
 //
@@ -102,11 +103,33 @@ server.tool(
 // through an append-only log on disk. A session publishes what it found, reads
 // what everyone else found, and can ask another session to dig further.
 
-let me: { id: string; label: string } | null = null;
-const root = () => board.boardRoot(process.cwd());
+let me: { id: string; label: string; root?: string } | null = null;
+// Where this session's board lives. The session id matters: if the human ticked
+// this session in `shepherd-connect`, its hook is writing to a board that has
+// nothing to do with the working directory, and these tools have to read the
+// same one or the session would see its own prompts vanish.
+const root = () => board.boardRoot(process.cwd(), selfSessionId());
 
 function requireJoin(): { id: string; label: string } {
   if (!me) throw new Error("Call `join` first so the other sessions know who you are.");
+
+  // The human can run `shepherd-connect` while this session is mid-conversation,
+  // which moves it to another board. The identity minted on the old board does
+  // not exist on the new one, so anything keyed to it — shares, asks, the inbox —
+  // would be attributed to a session nobody can see. Carry the identity over.
+  const here = root();
+  if (me.root && me.root !== here) {
+    const cwd = process.cwd();
+    const existing = board.read(here).sessions;
+    const prior = existing.find(
+      (x) => x.label.toLowerCase() === me!.label.toLowerCase() && (x.cwd ?? cwd) === cwd,
+    );
+    if (prior) me = { id: prior.id, label: prior.label, root: here };
+    else {
+      board.append(here, { kind: "join", at: board.now(), session: me.id, label: me.label, cwd });
+      me = { ...me, root: here };
+    }
+  }
   return me;
 }
 
@@ -137,7 +160,7 @@ server.tool(
     const effective = clash ? `${label}@${path.basename(cwd)}` : label;
 
     const id = prior?.id ?? board.newId();
-    me = { id, label: prior?.label ?? effective };
+    me = { id, label: prior?.label ?? effective, root: root() };
     if (!prior) {
       board.append(root(), { kind: "join", at: board.now(), session: id, label: effective, cwd });
     }
