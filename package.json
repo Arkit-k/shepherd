@@ -1,14 +1,15 @@
 {
-  "name": "shepherd",
+  "name": "@arkit-k/shepherd",
   "version": "0.0.1",
-  "description": "Production-readiness gate for AI-written code \u2014 you code, we shepherd it to production.",
+  "description": "Connect running Claude Code sessions to a shared board \u2014 each one sees what you type in the others. Plus a production-readiness audit for AI-written code.",
   "type": "module",
   "bin": {
     "shepherd": "./dist/cli.js",
     "shepherd-mcp": "./dist/mcp.js",
     "shepherd-hook": "./dist/hook.js",
     "shepherd-session": "./dist/session.js",
-    "shepherd-connect": "./dist/connect.js"
+    "shepherd-connect": "./dist/connect.js",
+    "shepherd-setup": "./dist/setup.js"
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
@@ -17,7 +18,9 @@
     "start:app": "node dist/app/server.js",
     "build": "tsc",
     "start": "node dist/cli.js",
-    "test": "tsx --test \"src/**/*.test.ts\""
+    "test": "tsx --test \"src/**/*.test.ts\"",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build && npm test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
@@ -33,5 +36,41 @@
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
-  }
+  },
+  "license": "MIT",
+  "author": "Arkit Karmokar",
+  "homepage": "https://github.com/Arkit-k/shepherd#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Arkit-k/shepherd.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Arkit-k/shepherd/issues"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "mcp",
+    "multi-agent",
+    "agents",
+    "ai",
+    "code-review",
+    "cli"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "docs",
+    "packs",
+    "scan",
+    "soul.md",
+    "user.md",
+    "README.md",
+    "LICENSE"
+  ]
 }

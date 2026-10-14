@@ -15,6 +15,19 @@ import { gitCheck, printGitCheck } from "./engine/gitcheck.js";
 // stress-test, hand off — and exits non-zero if it's not production-ready.
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+
+  // Two things genuinely are commands rather than conversation, because they
+  // change machine state outside any repo: wiring Shepherd into Claude Code, and
+  // choosing which running sessions share a board. Everything else is "just ask".
+  // The token is spliced out of argv so each module parses its own flags as if it
+  // had been invoked directly.
+  const sub = args[0];
+  if (sub === "setup" || sub === "connect") {
+    process.argv.splice(2, 1);
+    await import(sub === "setup" ? "./setup.js" : "./connect.js");
+    return;
+  }
+
   const path = args[0] && !args[0].startsWith("-") ? args[0] : ".";
 
   // `--git-check` is internal plumbing for the pre-push hook (not a user-facing

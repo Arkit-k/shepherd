@@ -11,6 +11,43 @@
 
 ---
 
+## Connect the Claude sessions you already have open
+
+```bash
+npx @arkit-k/shepherd setup     # wire into Claude Code, once
+shepherd-connect                # tick the sessions that should share a board
+```
+
+```
+  Connect which sessions to board default?
+
+  ↑↓ move · space toggle · a all · enter confirm · esc cancel
+
+  ❯ ◉ portfolio       ~/Projects/portfolio   (this session)
+    ◉ api             ~/Projects/api
+    ◯ scratch         ~/Desktop/scratch      · on "research"
+```
+
+From their next message, ticked sessions share a board — and the board carries
+**what you typed**, in every session, not just what the models chose to write
+down. Ask session B *"what did I just say in my other window?"* and it can answer.
+
+That last part is the whole point. Agent orchestration shares tasks between a
+lead and its workers; the workers never see the lead's conversation. Here every
+session has a **human** in it, and your own words are the shared context. So you
+can run one session for research, one tracking what you actually asked for, and
+one doing the work — each seeing the same thing you said.
+
+Nothing is injected into a running session; there is no API for that. The
+`UserPromptSubmit` hook is already firing in every Claude session on your
+machine. Ticking one just changes which board its hook writes to.
+
+[Full details →](docs/MULTI-SESSION.md)
+
+---
+
+## The production-readiness agent
+
 AI tools (Lovable, Bolt, v0, Cursor, Claude) ship working apps fast — and quietly leave behind cost-bombs, missing auth, client-only access control, outdated patterns, and architectural drift. Shepherd is the agent that catches what AI code specifically gets wrong, then **guides you through fixing it** — and writes the tests so it stays fixed.
 
 ```bash
