@@ -120,20 +120,33 @@ server.tool(
     // client (claude -p) is a new process every turn; minting a fresh id each
     // time would orphan any request already addressed to the earlier one, so
     // `inbox` would come back empty for work that is genuinely waiting.
-    const prior = board.read(root()).sessions.find(
-      (x) => x.label.toLowerCase() === label.toLowerCase(),
+    // Identity is (label, directory). Same label from the same directory is the
+    // same session rejoining — a one-shot client is a new process every turn, and
+    // minting a fresh id would orphan requests already addressed to it. The SAME
+    // label from a DIFFERENT directory is a genuinely different session (two
+    // "main"s, one per project), so it gets its own identity and a qualified
+    // label, otherwise `ask main` would be ambiguous and one would silently
+    // inherit the other's inbox.
+    const cwd = process.cwd();
+    const existing = board.read(root()).sessions;
+    const prior = existing.find(
+      (x) => x.label.toLowerCase() === label.toLowerCase() && (x.cwd ?? cwd) === cwd,
     );
+    const clash = !prior && existing.find((x) => x.label.toLowerCase() === label.toLowerCase());
+    const effective = clash ? `${label}@${path.basename(cwd)}` : label;
+
     const id = prior?.id ?? board.newId();
-    me = { id, label };
+    me = { id, label: prior?.label ?? effective };
     if (!prior) {
-      board.append(root(), { kind: "join", at: board.now(), session: id, label });
+      board.append(root(), { kind: "join", at: board.now(), session: id, label: effective, cwd });
     }
     const st = board.read(root());
     const others = st.sessions.filter((s) => s.id !== id).map((s) => s.label);
     return {
       content: [{
         type: "text",
-        text: `${prior ? "Resumed" : "Joined"} as "${label}" (${id.slice(0, 8)}).\n` +
+        text: `${prior ? "Resumed" : "Joined"} as "${me.label}" (${id.slice(0, 8)}).\n` +
+        (clash ? `("${label}" was taken by a session in another directory, so you are "${effective}".)\n` : "") +
           (others.length ? `Other sessions on the board: ${others.join(", ")}` : "You are the first session here.") +
           `\n\nHuman-readable view: ${board.mirrorPath(root())}`,
       }],
@@ -267,7 +280,7 @@ server.tool(
       return { content: [{ type: "text", text: `A session called "${label}" is already on this board. Pick another label or use \`ask\` to give it work.` }] };
     }
     const dir = process.cwd();
-    const boardDir = root();
+    const boardDir = root(); // the board this session is already on — the child joins it
     const q = (x: string) => `'${x.replace(/'/g, `'\\''`)}'`;
     const prompt =
       `Join the shepherd board as '${label}'.` +
@@ -275,7 +288,9 @@ server.tool(
       ` Share what you find with \`share\` so the other sessions can see it, and check \`inbox\` for requests.`;
     const cmd =
       `cd ${q(dir)} && export SHEPHERD_SESSION_LABEL=${q(label)} && ` +
-      `export SHEPHERD_BOARD=${q(boardDir)} && claude ${q(prompt)}`;
+      `export SHEPHERD_BOARD=${q(boardDir)} && ` +
+      // without this the spawned session stalls on a permission prompt
+      `claude --allowedTools mcp__shepherd__join mcp__shepherd__share mcp__shepherd__board mcp__shepherd__ask mcp__shepherd__inbox mcp__shepherd__answer mcp__shepherd__said mcp__shepherd__spawn ${q(prompt)}`;
 
     if (process.platform !== "darwin") {
       return { content: [{ type: "text", text: `Cannot open a window on this platform. Run this yourself:\n\n  ${cmd}` }] };

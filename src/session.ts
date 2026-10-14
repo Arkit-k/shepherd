@@ -1,74 +1,100 @@
 #!/usr/bin/env node
-// `shepherd session <label> [dir]` — launch a Claude session already wired to the
-// board.
+// Launch a Claude session joined to a board.
 //
-// Until now a session had to be started by hand with SHEPHERD_SESSION_LABEL set
-// and the right working directory, which meant something outside Shepherd had to
-// do the wiring. This does it: picks the board, sets the label, opens a terminal.
+//   shepherd-session                  join the default board, labelled after this folder
+//   shepherd-session main             join the default board as "main"
+//   shepherd-session main work        join the board called "work" as "main"
+//   shepherd-session --list           show boards and who is on them
+//
+// Boards are NAMES, not paths. They live under ~/.shepherd/boards/<name>, so two
+// sessions connect by naming the same board — no paths to type, no environment
+// variables to export, and the directory you are working in stays independent of
+// the board you are on. That separation is the point: you can have a session in
+// each of three projects, all on one board.
 import { spawnSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 
-const [, , label, dirArg] = process.argv;
+const BOARDS = path.join(os.homedir(), ".shepherd", "boards");
+const boardPath = (name: string) => path.join(BOARDS, name);
 
-if (!label || label === "--help" || label === "-h") {
+const args = process.argv.slice(2);
+
+if (args[0] === "--help" || args[0] === "-h") {
   console.log(`
-shepherd session <label> [dir]
+shepherd-session [label] [board]
 
-  Opens a Claude session joined to a shared board.
+  shepherd-session                  default board, labelled after this folder
+  shepherd-session main             default board, as "main"
+  shepherd-session main work        board "work", as "main"
+  shepherd-session --list           show boards and who is on them
 
-    shepherd session main
-    shepherd session research ~/Projects/foo
-    SHEPHERD_BOARD=~/boards/x shepherd session reviewer
-
-  <label>  how other sessions address this one ("main", "research", "intent")
-  [dir]    working directory; defaults to the current one
-
-  The board is SHEPHERD_BOARD if set, otherwise the working directory. Sessions
-  sharing a board can see each other — that is how two sessions in DIFFERENT
-  project folders are connected.
+Boards live in ~/.shepherd/boards/<name>. Sessions on the same board see each
+other's findings and each other's prompts, whatever directory they are working in.
+Two sessions using the same label in different folders are kept distinct
+automatically (the second becomes "main@folder").
 `);
-  process.exit(label ? 0 : 1);
+  process.exit(0);
 }
 
-const dir = path.resolve(dirArg ?? process.cwd());
-const boardDir = path.resolve(process.env.SHEPHERD_BOARD ?? dir);
-if (!existsSync(dir)) {
-  console.error(`No such directory: ${dir}`);
-  process.exit(1);
+if (args[0] === "--list" || args[0] === "-l") {
+  if (!existsSync(BOARDS)) {
+    console.log("No boards yet. `shepherd-session main` creates one.");
+    process.exit(0);
+  }
+  const names = readdirSync(BOARDS).filter((n) => !n.startsWith("."));
+  if (!names.length) console.log("No boards yet.");
+  for (const n of names) {
+    const log = path.join(boardPath(n), ".shepherd", "board", "events.jsonl");
+    let who: string[] = [];
+    let msgs = 0;
+    try {
+      for (const line of readFileSync(log, "utf8").split("\n").filter(Boolean)) {
+        const e = JSON.parse(line);
+        if (e.kind === "join") who.push(e.label);
+        if (e.kind === "user") msgs++;
+      }
+    } catch {
+      /* board exists but nothing in it yet */
+    }
+    console.log(`  ${n.padEnd(16)} ${who.length ? who.join(", ") : "(empty)"}${msgs ? `  · ${msgs} messages` : ""}`);
+  }
+  process.exit(0);
 }
-mkdirSync(path.join(boardDir, ".shepherd"), { recursive: true });
+
+const label = args[0] ?? path.basename(process.cwd());
+const boardName = args[1] ?? "default";
+const board = boardPath(boardName);
+const dir = process.cwd();
+
+mkdirSync(path.join(board, ".shepherd"), { recursive: true });
 
 const prompt =
-  `Join the shepherd board as '${label}'. Then tell me who else is on the board ` +
-  `and wait. You can read what I type into OTHER sessions with the \`said\` tool — ` +
-  `those messages never appear in your own transcript.`;
+  `Join the shepherd board as '${label}'. Then tell me who else is on the board and wait. ` +
+  `Use the \`said\` tool to read what I type into OTHER sessions — those never appear in your transcript.`;
 
-// Everything the child needs, as shell-quoted exports: the label attributes this
-// session's prompts, and SHEPHERD_BOARD keeps sessions in different project
-// folders pointed at one board.
 const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+// Pre-allow the board tools. Without this the session opens and then sits at a
+// permission prompt before it can even join, which looks like a hang.
+const BOARD_TOOLS = "mcp__shepherd__join mcp__shepherd__share mcp__shepherd__board mcp__shepherd__ask mcp__shepherd__inbox mcp__shepherd__answer mcp__shepherd__said mcp__shepherd__spawn";
+
 const cmd =
-  `cd ${q(dir)} && ` +
-  `export SHEPHERD_SESSION_LABEL=${q(label)} && ` +
-  `export SHEPHERD_BOARD=${q(boardDir)} && ` +
-  `claude ${q(prompt)}`;
+  `cd ${q(dir)} && export SHEPHERD_SESSION_LABEL=${q(label)} && ` +
+  `export SHEPHERD_BOARD=${q(board)} && ` +
+  `claude --allowedTools ${BOARD_TOOLS} ${q(prompt)}`;
 
-const isMac = process.platform === "darwin";
-const hasOsascript = isMac && spawnSync("which", ["osascript"]).status === 0;
+const canWindow =
+  process.platform === "darwin" && spawnSync("which", ["osascript"]).status === 0;
 
-if (hasOsascript) {
+if (canWindow) {
   const script = `tell application "Terminal"\n activate\n do script ${JSON.stringify(cmd)}\nend tell`;
-  const r = spawnSync("osascript", ["-e", script], { stdio: "ignore" });
-  if (r.status === 0) {
-    console.log(`Opened a Terminal window: session "${label}"`);
-    console.log(`  dir   ${dir}`);
-    console.log(`  board ${boardDir}`);
+  if (spawnSync("osascript", ["-e", script], { stdio: "ignore" }).status === 0) {
+    console.log(`session "${label}" on board "${boardName}"  ·  working in ${dir}`);
     process.exit(0);
   }
 }
 
-// No windowing available — run it here instead of failing.
-console.log(`Starting session "${label}" (board: ${boardDir})`);
+console.log(`session "${label}" on board "${boardName}"`);
 const child = spawn("sh", ["-c", cmd], { stdio: "inherit" });
 child.on("exit", (c) => process.exit(c ?? 0));

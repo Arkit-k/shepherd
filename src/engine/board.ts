@@ -22,7 +22,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 export type Event =
-  | { kind: "join"; at: string; session: string; label: string }
+  | { kind: "join"; at: string; session: string; label: string; cwd?: string }
   | { kind: "share"; at: string; id: string; session: string; title: string; content: string; tags: string[] }
   | { kind: "ask"; at: string; id: string; from: string; to: string; request: string }
   | { kind: "answer"; at: string; id: string; ask: string; from: string; content: string }
@@ -31,7 +31,7 @@ export type Event =
   // every session sees the user's actual words, not another session's summary.
   | { kind: "user"; at: string; label: string; text: string };
 
-export type Session = { id: string; label: string; joinedAt: string };
+export type Session = { id: string; label: string; joinedAt: string; cwd?: string };
 export type Share = { id: string; session: string; label: string; title: string; content: string; tags: string[]; at: string };
 export type Ask = { id: string; from: string; fromLabel: string; to: string; request: string; at: string; answer?: { content: string; from: string; at: string } };
 
@@ -83,7 +83,7 @@ export function read(root: string): BoardState {
     if (e.kind === "join") {
       labelOf.set(e.session, e.label);
       if (!state.sessions.some((s) => s.id === e.session)) {
-        state.sessions.push({ id: e.session, label: e.label, joinedAt: e.at });
+        state.sessions.push({ id: e.session, label: e.label, joinedAt: e.at, cwd: e.cwd });
       }
     } else if (e.kind === "share") {
       state.shares.push({
@@ -141,7 +141,10 @@ export function writeMirror(root: string): void {
     "",
   ];
   if (!s.sessions.length) lines.push("_none yet_", "");
-  for (const x of s.sessions) lines.push(`- **${x.label}** \`${x.id.slice(0, 8)}\` — joined ${x.joinedAt}`);
+  for (const x of s.sessions)
+    lines.push(
+      `- **${x.label}** \`${x.id.slice(0, 8)}\`${x.cwd ? ` — \`${x.cwd}\`` : ""} — joined ${x.joinedAt}`,
+    );
 
   lines.push("", "## Open requests", "");
   if (!open.length) lines.push("_none_", "");
