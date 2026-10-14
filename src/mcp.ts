@@ -8,6 +8,7 @@ import { z } from "zod";
 import { scan } from "./engine/run.js";
 import { buildFixOrder, writeFixOrder } from "./engine/handoff.js";
 import * as board from "./engine/board.js";
+import { SESSION_TOOLS } from "./engine/session-tools.js";
 
 // Shepherd as an MCP server — this is how Claude Code "wires in".
 //

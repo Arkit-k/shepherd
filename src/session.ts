@@ -15,6 +15,7 @@ import { spawnSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { SESSION_TOOLS } from "./engine/session-tools.js";
 
 const BOARDS = path.join(os.homedir(), ".shepherd", "boards");
 const boardPath = (name: string) => path.join(BOARDS, name);
