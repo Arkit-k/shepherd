@@ -1,15 +1,15 @@
 {
   "name": "@arkit/shepherd",
   "version": "0.0.1",
-  "description": "Connect running Claude Code sessions to a shared board \u2014 each one sees what you type in the others. Plus a production-readiness audit for AI-written code.",
+  "description": "Connect running Claude Code sessions to a shared board — each one sees what you type in the others. Plus a production-readiness audit for AI-written code.",
   "type": "module",
   "bin": {
-    "shepherd": "./dist/cli.js",
-    "shepherd-mcp": "./dist/mcp.js",
-    "shepherd-hook": "./dist/hook.js",
-    "shepherd-session": "./dist/session.js",
-    "shepherd-connect": "./dist/connect.js",
-    "shepherd-setup": "./dist/setup.js"
+    "shepherd": "dist/cli.js",
+    "shepherd-mcp": "dist/mcp.js",
+    "shepherd-hook": "dist/hook.js",
+    "shepherd-session": "dist/session.js",
+    "shepherd-connect": "dist/connect.js",
+    "shepherd-setup": "dist/setup.js"
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
@@ -20,7 +20,9 @@
     "start": "node dist/cli.js",
     "test": "tsx --test \"src/**/*.test.ts\"",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "npm run build && npm test",
+    "release": "node scripts/publish.mjs",
+    "release:dry": "node scripts/publish.mjs --dry-run"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
@@ -64,6 +66,7 @@
     "access": "public"
   },
   "files": [
+    "scripts",
     "dist",
     "docs",
     "packs",

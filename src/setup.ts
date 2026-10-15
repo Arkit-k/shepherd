@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 // `shepherd setup` — wire Shepherd into Claude Code.
 //
-//   npx @arkit/shepherd setup
-//   npx @arkit/shepherd setup --uninstall
+//   npx claude-shepherd setup
+//   npx claude-shepherd setup --uninstall
+//
+// Also published as @arkit/shepherd; `npm i -g` either one gives you the plain
+// `shepherd` and `shepherd-connect` commands.
 //
 // Two things have to be true before the multi-session board works, and both of
 // them used to be a paragraph of README asking people to hand-edit JSON with an

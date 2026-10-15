@@ -14,7 +14,7 @@
 ## Connect the Claude sessions you already have open
 
 ```bash
-npx @arkit/shepherd setup     # wire into Claude Code, once
+npx claude-shepherd setup     # wire into Claude Code, once
 shepherd-connect                # tick the sessions that should share a board
 ```
 
