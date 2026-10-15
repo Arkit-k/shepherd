@@ -53,12 +53,18 @@ function resolveLabel(sessionId: string | undefined, cwd: string): string {
  * match what mcp.ts `join` writes, including the label@folder qualification, or
  * the two paths would disagree about who is who.
  */
-function registerIfNeeded(root: string, label: string, cwd: string): void {
+function registerIfNeeded(root: string, label: string, cwd: string): string {
   const state = board.read(root);
-  const mine = state.sessions.find(
-    (s) => s.label.toLowerCase() === label.toLowerCase() && (s.cwd ?? cwd) === cwd,
-  );
-  if (mine) return;
+  // Match the QUALIFIED form too. On a clash we register as "label@folder", so a
+  // later prompt looking only for "label" would never find itself and would
+  // append a fresh join every single turn — the board fills up with copies of one
+  // session, and `ask` becomes ambiguous between them.
+  const qualified = `${label}@${path.basename(cwd)}`.toLowerCase();
+  const mine = state.sessions.find((s) => {
+    const l = s.label.toLowerCase();
+    return (l === label.toLowerCase() || l === qualified) && (s.cwd ?? cwd) === cwd;
+  });
+  if (mine) return mine.label;
 
   const clash = state.sessions.find((s) => s.label.toLowerCase() === label.toLowerCase());
   const effective = clash ? `${label}@${path.basename(cwd)}` : label;
@@ -70,6 +76,7 @@ function registerIfNeeded(root: string, label: string, cwd: string): void {
     label: effective,
     cwd,
   });
+  return effective;
 }
 
 async function main() {
@@ -93,8 +100,11 @@ async function main() {
   const root = board.boardRoot(cwd, sessionId);
   const label = resolveLabel(sessionId, cwd);
 
-  registerIfNeeded(root, label, cwd);
-  board.append(root, { kind: "user", at: board.now(), label, text: prompt });
+  // Attribute the message to the label this session is actually REGISTERED under.
+  // On a clash that is "label@folder", and using the bare label here would put two
+  // different people's words under one name on the board.
+  const effective = registerIfNeeded(root, label, cwd);
+  board.append(root, { kind: "user", at: board.now(), label: effective, text: prompt });
 }
 
 main()
