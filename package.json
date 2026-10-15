@@ -1,5 +1,5 @@
 {
-  "name": "@arkit-k/shepherd",
+  "name": "@arkit/shepherd",
   "version": "0.0.1",
   "description": "Connect running Claude Code sessions to a shared board \u2014 each one sees what you type in the others. Plus a production-readiness audit for AI-written code.",
   "type": "module",
