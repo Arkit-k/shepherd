@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { watch, existsSync, statSync } from "node:fs";
+import { watch, existsSync, statSync, writeFileSync, unlinkSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
+import os from "node:os";
 import { z } from "zod";
 import { scan } from "./engine/run.js";
 import { buildFixOrder, writeFixOrder } from "./engine/handoff.js";
@@ -97,6 +98,25 @@ server.tool(
     return { content: [{ type: "text", text: order }] };
   },
 );
+
+/**
+ * Open a Terminal window running `cmd`.
+ *
+ * The AppleScript goes through a FILE, not `osascript -e`. With -e, anything
+ * outside ASCII — an em dash in a task description is enough — fails with
+ * "syntax error: Expected but found unknown token". Found the hard way: a task
+ * containing one em dash silently refused to launch.
+ */
+function openTerminal(cmd: string): boolean {
+  const script = `tell application "Terminal"\n activate\n do script ${JSON.stringify(cmd)}\nend tell`;
+  const f = path.join(os.tmpdir(), `shepherd-${Date.now()}.applescript`);
+  try {
+    writeFileSync(f, script, "utf8");
+    return spawnSync("osascript", [f], { stdio: "ignore" }).status === 0;
+  } finally {
+    try { unlinkSync(f); } catch { /* best effort */ }
+  }
+}
 
 // ── Multi-session board ──────────────────────────────────────────────────────
 // Several Claude sessions, each running its own copy of this server, coordinate
@@ -324,9 +344,7 @@ server.tool(
     if (process.platform !== "darwin") {
       return { content: [{ type: "text", text: `Cannot open a window on this platform. Run this yourself:\n\n  ${cmd}` }] };
     }
-    const script = `tell application "Terminal"\n activate\n do script ${JSON.stringify(cmd)}\nend tell`;
-    const r = spawnSync("osascript", ["-e", script], { stdio: "ignore" });
-    if (r.status !== 0) {
+    if (!openTerminal(cmd)) {
       return { content: [{ type: "text", text: `Could not open a terminal. Run this yourself:\n\n  ${cmd}` }] };
     }
     return {

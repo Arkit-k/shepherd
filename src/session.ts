@@ -12,8 +12,9 @@
 // the board you are on. That separation is the point: you can have a session in
 // each of three projects, all on one board.
 import { spawnSync, spawn } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { SESSION_TOOLS } from "./engine/session-tools.js";
 import { BOARDS, boardPath, DEFAULT_BOARD, ensureBoard } from "./engine/boards.js";
 
@@ -86,8 +87,13 @@ const canWindow =
   process.platform === "darwin" && spawnSync("which", ["osascript"]).status === 0;
 
 if (canWindow) {
+  // Via a file, not `osascript -e`: -e chokes on any non-ASCII in the command.
   const script = `tell application "Terminal"\n activate\n do script ${JSON.stringify(cmd)}\nend tell`;
-  if (spawnSync("osascript", ["-e", script], { stdio: "ignore" }).status === 0) {
+  const f = path.join(os.tmpdir(), `shepherd-session-${Date.now()}.applescript`);
+  writeFileSync(f, script, "utf8");
+  const launched = spawnSync("osascript", [f], { stdio: "ignore" }).status === 0;
+  try { unlinkSync(f); } catch { /* best effort */ }
+  if (launched) {
     console.log(`session "${label}" on board "${boardName}"  ·  working in ${dir}`);
     process.exit(0);
   }
