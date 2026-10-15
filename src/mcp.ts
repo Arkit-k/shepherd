@@ -313,8 +313,13 @@ server.tool(
     const cmd =
       `cd ${q(dir)} && export SHEPHERD_SESSION_LABEL=${q(label)} && ` +
       `export SHEPHERD_BOARD=${q(boardDir)} && ` +
-      // without this the spawned session stalls on a permission prompt
-      `claude --allowedTools mcp__shepherd__join mcp__shepherd__share mcp__shepherd__board mcp__shepherd__ask mcp__shepherd__inbox mcp__shepherd__answer mcp__shepherd__said mcp__shepherd__spawn ${q(prompt)}`;
+      // `--` before the prompt, and this is not cosmetic. --allowedTools is
+      // VARIADIC: it keeps consuming arguments until the next flag, so a trailing
+      // prompt is read as one more tool name and the session opens with no
+      // instructions at all. That looked for weeks like the model ignoring its
+      // task. Verified: without `--`, claude -p reports "Input must be provided";
+      // with it, the prompt parses.
+      `claude --allowedTools ${q(SESSION_TOOLS.join(","))} -- ${q(prompt)}`;
 
     if (process.platform !== "darwin") {
       return { content: [{ type: "text", text: `Cannot open a window on this platform. Run this yourself:\n\n  ${cmd}` }] };

@@ -73,12 +73,14 @@ const prompt =
 const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 // Pre-allow the board tools. Without this the session opens and then sits at a
 // permission prompt before it can even join, which looks like a hang.
-const BOARD_TOOLS = SESSION_TOOLS.join(" ");
+// The `--` below matters: --allowedTools is variadic and will otherwise eat the
+// prompt, launching a session that was never told what it is for.
+const BOARD_TOOLS = SESSION_TOOLS.join(",");
 
 const cmd =
   `cd ${q(dir)} && export SHEPHERD_SESSION_LABEL=${q(label)} && ` +
   `export SHEPHERD_BOARD=${q(board)} && ` +
-  `claude --allowedTools ${BOARD_TOOLS} ${q(prompt)}`;
+  `claude --allowedTools ${q(BOARD_TOOLS)} -- ${q(prompt)}`;
 
 const canWindow =
   process.platform === "darwin" && spawnSync("which", ["osascript"]).status === 0;
