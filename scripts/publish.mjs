@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Publish the same build under both names:
 //
-//   @arkit/shepherd    the brand, matches arkit.live
+//   @arkit-k/shepherd    the brand, matches arkit.live
 //   claude-shepherd    unscoped, so `npx claude-shepherd setup` works with no
 //                      org and no install, and it is findable in npm search
 //
@@ -14,7 +14,7 @@ import { spawnSync } from "node:child_process";
 const PKG = new URL("../package.json", import.meta.url);
 // Unscoped first: it needs no org, so it is the one that will certainly work.
 // The scoped name 403s until a free npm org named "arkit" exists.
-const ALIASES = ["claude-shepherd", "@arkit/shepherd"];
+const ALIASES = ["claude-shepherd", "@arkit-k/shepherd"];
 const original = readFileSync(PKG, "utf8");
 const dry = process.argv.includes("--dry-run");
 
@@ -43,7 +43,7 @@ try {
     else failed.push(name);
   }
 } finally {
-  writeFileSync(PKG, original); // always leave the repo name as @arkit/shepherd
+  writeFileSync(PKG, original); // always leave the repo name as @arkit-k/shepherd
 }
 
 if (done.length) console.log(`\n✔ published: ${done.join(", ")}`);

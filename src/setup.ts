@@ -4,7 +4,7 @@
 //   npx claude-shepherd setup
 //   npx claude-shepherd setup --uninstall
 //
-// Also published as @arkit/shepherd; `npm i -g` either one gives you the plain
+// Also published as @arkit-k/shepherd; `npm i -g` either one gives you the plain
 // `shepherd` and `shepherd-connect` commands.
 //
 // Two things have to be true before the multi-session board works, and both of
