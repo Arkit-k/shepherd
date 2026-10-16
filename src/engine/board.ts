@@ -24,7 +24,9 @@ import { randomUUID } from "node:crypto";
 import { boardPath, connectionFor } from "./boards.js";
 
 export type Event =
-  | { kind: "join"; at: string; session: string; label: string; cwd?: string }
+  // `sid` is Claude Code's own session id. Identity used to be (label, cwd), which
+  // gave one session two entries on the board the moment it changed directory.
+  | { kind: "join"; at: string; session: string; label: string; cwd?: string; sid?: string }
   | { kind: "share"; at: string; id: string; session: string; title: string; content: string; tags: string[] }
   | { kind: "ask"; at: string; id: string; from: string; to: string; request: string }
   | { kind: "answer"; at: string; id: string; ask: string; from: string; content: string }
@@ -33,7 +35,7 @@ export type Event =
   // every session sees the user's actual words, not another session's summary.
   | { kind: "user"; at: string; label: string; text: string };
 
-export type Session = { id: string; label: string; joinedAt: string; cwd?: string };
+export type Session = { id: string; label: string; joinedAt: string; cwd?: string; sid?: string };
 export type Share = { id: string; session: string; label: string; title: string; content: string; tags: string[]; at: string };
 export type Ask = { id: string; from: string; fromLabel: string; to: string; request: string; at: string; answer?: { content: string; from: string; at: string } };
 
@@ -85,7 +87,7 @@ export function read(root: string): BoardState {
     if (e.kind === "join") {
       labelOf.set(e.session, e.label);
       if (!state.sessions.some((s) => s.id === e.session)) {
-        state.sessions.push({ id: e.session, label: e.label, joinedAt: e.at, cwd: e.cwd });
+        state.sessions.push({ id: e.session, label: e.label, joinedAt: e.at, cwd: e.cwd, sid: e.sid });
       }
     } else if (e.kind === "share") {
       state.shares.push({

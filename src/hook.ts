@@ -53,8 +53,17 @@ function resolveLabel(sessionId: string | undefined, cwd: string): string {
  * match what mcp.ts `join` writes, including the label@folder qualification, or
  * the two paths would disagree about who is who.
  */
-function registerIfNeeded(root: string, label: string, cwd: string): string {
+function registerIfNeeded(root: string, label: string, cwd: string, sid?: string): string {
   const state = board.read(root);
+
+  // Claude's session id is the only stable identity. Matching on (label, cwd)
+  // alone meant a `cd` mid-conversation produced a SECOND entry for the same
+  // session — the board listed one window twice and `ask` could not tell them
+  // apart.
+  if (sid) {
+    const bySid = state.sessions.find((s) => s.sid === sid);
+    if (bySid) return bySid.label;
+  }
   // Match the QUALIFIED form too. On a clash we register as "label@folder", so a
   // later prompt looking only for "label" would never find itself and would
   // append a fresh join every single turn — the board fills up with copies of one
@@ -75,6 +84,7 @@ function registerIfNeeded(root: string, label: string, cwd: string): string {
     session: board.newId(),
     label: effective,
     cwd,
+    sid,
   });
   return effective;
 }
@@ -103,7 +113,7 @@ async function main() {
   // Attribute the message to the label this session is actually REGISTERED under.
   // On a clash that is "label@folder", and using the bare label here would put two
   // different people's words under one name on the board.
-  const effective = registerIfNeeded(root, label, cwd);
+  const effective = registerIfNeeded(root, label, cwd, sessionId);
   board.append(root, { kind: "user", at: board.now(), label: effective, text: prompt });
 }
 

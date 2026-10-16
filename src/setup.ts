@@ -175,6 +175,34 @@ function install() {
 `);
 }
 
-const args = process.argv.slice(2);
-if (args.includes("--uninstall") || args.includes("--remove")) uninstall();
-else install();
+function help() {
+  console.log(`
+shepherd setup
+
+  shepherd setup              wire Shepherd into Claude Code
+  shepherd setup --uninstall  remove only what setup added
+
+Writes the UserPromptSubmit hook into ~/.claude/settings.json (merging, with a
+backup) and registers the MCP server. Safe to run twice.
+`);
+}
+
+const args = process.argv.slice(2).filter((a) => a !== "setup");
+const flags = args.filter((a) => a.startsWith("-"));
+const known = new Set(["--uninstall", "--remove", "--help", "-h"]);
+const unknown = flags.filter((f) => !known.has(f));
+
+// An unrecognised flag must NOT fall through to install(). Touching someone's
+// settings.json because they typed a flag we do not understand is not a
+// defensible default.
+if (unknown.length) {
+  console.error(`\n  Unknown option: ${unknown.join(", ")}`);
+  help();
+  process.exit(1);
+} else if (flags.includes("--help") || flags.includes("-h")) {
+  help();
+} else if (flags.includes("--uninstall") || flags.includes("--remove")) {
+  uninstall();
+} else {
+  install();
+}
