@@ -1,6 +1,6 @@
 {
   "name": "@arkit/shepherd",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Connect running Claude Code sessions to a shared board — each one sees what you type in the others. Plus a production-readiness audit for AI-written code.",
   "type": "module",
   "bin": {
