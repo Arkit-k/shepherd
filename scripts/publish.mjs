@@ -12,7 +12,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
 const PKG = new URL("../package.json", import.meta.url);
-const ALIASES = ["@arkit/shepherd", "claude-shepherd"];
+// Unscoped first: it needs no org, so it is the one that will certainly work.
+// The scoped name 403s until a free npm org named "arkit" exists.
+const ALIASES = ["claude-shepherd", "@arkit/shepherd"];
 const original = readFileSync(PKG, "utf8");
 const dry = process.argv.includes("--dry-run");
 
@@ -24,6 +26,7 @@ if (!run("npm", ["run", "build"]) || !run("npm", ["test"])) {
 }
 
 const done = [];
+const failed = [];
 try {
   for (const name of ALIASES) {
     const pkg = JSON.parse(original);
@@ -34,17 +37,23 @@ try {
     // --ignore-scripts: prepublishOnly would re-run build+test for each name.
     const args = ["publish", "--access", "public", "--ignore-scripts"];
     if (dry) args.push("--dry-run");
-    if (!run("npm", args)) {
-      console.error(`\n${name} failed.`);
-      if (done.length) console.error(`Already published: ${done.join(", ")} — bump the version before retrying.`);
-      process.exit(1);
-    }
-    done.push(name);
+    // Carry on rather than aborting. One name failing (usually a missing org)
+    // is no reason to withhold the one that works.
+    if (run("npm", args)) done.push(name);
+    else failed.push(name);
   }
 } finally {
   writeFileSync(PKG, original); // always leave the repo name as @arkit/shepherd
 }
 
-console.log(`\n✔ published: ${done.join(", ")}`);
-console.log(`\n  npx claude-shepherd setup`);
-console.log(`  npm i -g @arkit/shepherd  →  shepherd setup, shepherd connect\n`);
+if (done.length) console.log(`\n✔ published: ${done.join(", ")}`);
+if (failed.length) {
+  console.log(`\n✗ not published: ${failed.join(", ")}`);
+  if (failed.some((n) => n.startsWith("@")))
+    console.log(`  A scoped name needs an npm org you own. Create one free at`);
+    console.log(`  https://www.npmjs.com/org/create , then re-run — the version does`);
+    console.log(`  NOT need bumping for a name that never published.`);
+}
+if (done.includes("claude-shepherd")) console.log(`\n  npx claude-shepherd setup`);
+console.log("");
+process.exit(done.length ? 0 : 1);
