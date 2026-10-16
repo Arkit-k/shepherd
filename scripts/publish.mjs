@@ -17,6 +17,9 @@ const PKG = new URL("../package.json", import.meta.url);
 const ALIASES = ["claude-shepherd", "@arkit-k/shepherd"];
 const original = readFileSync(PKG, "utf8");
 const dry = process.argv.includes("--dry-run");
+// npm is restricting tokens that bypass 2FA for direct publishing, so an account
+// with 2FA on needs a one-time code:  npm run release -- --otp=123456
+const otp = process.argv.find((a) => a.startsWith("--otp="))?.slice(6);
 
 const run = (cmd, args) => spawnSync(cmd, args, { stdio: "inherit" }).status === 0;
 
@@ -36,6 +39,7 @@ try {
     console.log(`\n── publishing ${name} ${dry ? "(dry run)" : ""}`);
     // --ignore-scripts: prepublishOnly would re-run build+test for each name.
     const args = ["publish", "--access", "public", "--ignore-scripts"];
+    if (otp) args.push("--otp", otp);
     if (dry) args.push("--dry-run");
     // Carry on rather than aborting. One name failing (usually a missing org)
     // is no reason to withhold the one that works.
@@ -49,6 +53,8 @@ try {
 if (done.length) console.log(`\n✔ published: ${done.join(", ")}`);
 if (failed.length) {
   console.log(`\n✗ not published: ${failed.join(", ")}`);
+  console.log(`  A 404 on PUT usually means expired auth, not a bad name — run \`npm whoami\`.`);
+  console.log(`  If 2FA is on:  npm run release -- --otp=123456`);
   if (failed.some((n) => n.startsWith("@")))
     console.log(`  A scoped name needs an npm org you own. Create one free at`);
     console.log(`  https://www.npmjs.com/org/create , then re-run — the version does`);
